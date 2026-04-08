@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header>
+      <h1>ReadAloud</h1>
+      <span id="status-dot" class="dot dot-idle"></span>
+      <span id="status-text">Idle</span>
+    </header>
+
+    <div class="controls">
+      <label for="voice-select">Voice</label>
+      <select id="voice-select"></select>
+
+      <label for="speed-range">Speed: <span id="speed-value">1.0</span>x</label>
+      <input type="range" id="speed-range" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+
+    <div class="actions">
+      <button id="btn-selection">Read Selection</button>
+      <button id="btn-page">Read Page</button>
+      <button id="btn-stop" class="hidden">Stop</button>
+    </div>
+
+    <div id="progress-section" class="hidden">
+      <div class="progress-bar">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+      <span id="progress-text"></span>
+    </div>
+
+    <div id="error-section" class="hidden">
+      <p id="error-text"></p>
+    </div>
+
+    <footer>
+      <span id="server-dot" class="dot dot-unknown"></span>
+      <span id="server-text">Checking server...</span>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

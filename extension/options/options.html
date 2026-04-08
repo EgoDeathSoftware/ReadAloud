@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ReadAloud Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>ReadAloud Settings</h1>
+
+    <div class="field">
+      <label for="server-url">Server URL</label>
+      <input type="url" id="server-url" placeholder="http://localhost:8000">
+    </div>
+
+    <div class="field">
+      <label for="voice-select">Default Voice</label>
+      <select id="voice-select">
+        <option value="">Loading voices...</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="speed-range">Default Speed: <span id="speed-value">1.0</span>x</label>
+      <input type="range" id="speed-range" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+
+    <div class="actions">
+      <button id="btn-save">Save</button>
+      <button id="btn-test">Test Connection</button>
+    </div>
+
+    <div id="message" class="hidden"></div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
