@@ -15,6 +15,12 @@ const state = {
 let audio = new Audio();
 let pollTimer = null;
 
+// Chunk streaming state
+let chunkQueue = [];
+let chunksFetched = 0;
+let currentChunkIndex = 0;
+let allChunksGenerated = false;
+
 function resetState() {
   state.phase = "idle";
   state.jobId = null;
@@ -22,6 +28,10 @@ function resetState() {
   state.chunksCompleted = 0;
   state.chunksTotal = 0;
   state.error = null;
+  chunkQueue = [];
+  chunksFetched = 0;
+  currentChunkIndex = 0;
+  allChunksGenerated = false;
 }
 
 function setError(message) {
@@ -87,13 +97,22 @@ function stopPolling() {
   }
 }
 
-function stopPlayback() {
-  audio.pause();
-  audio.currentTime = 0;
+function revokeCurrentBlob() {
   if (audio.src && audio.src.startsWith("blob:")) {
     URL.revokeObjectURL(audio.src);
   }
+}
+
+function stopPlayback() {
+  audio.pause();
+  audio.currentTime = 0;
+  audio.onended = null;
+  audio.onerror = null;
+  revokeCurrentBlob();
   audio.src = "";
+  for (const blobUrl of chunkQueue) {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+  }
 }
 
 function stopAll() {
@@ -103,7 +122,112 @@ function stopAll() {
   broadcastState();
 }
 
-async function playAudioBlob(jobId) {
+async function fetchChunkBlob(jobId, chunkIndex) {
+  const serverUrl = await getServerUrl();
+  const url =
+    serverUrl.replace(/\/+$/, "") +
+    `/api/tts/audio/${jobId}/${chunkIndex}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chunk ${chunkIndex}: ${response.status}`);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+function playNextChunk() {
+  if (state.phase !== "playing" && state.phase !== "paused") return;
+
+  if (currentChunkIndex >= chunkQueue.length) {
+    if (allChunksGenerated && currentChunkIndex >= state.chunksTotal) {
+      resetState();
+      broadcastState();
+    }
+    return;
+  }
+
+  const blobUrl = chunkQueue[currentChunkIndex];
+  if (!blobUrl) return;
+
+  revokeCurrentBlob();
+  audio.src = blobUrl;
+
+  audio.onended = () => {
+    URL.revokeObjectURL(blobUrl);
+    chunkQueue[currentChunkIndex] = null;
+    currentChunkIndex++;
+    if (currentChunkIndex >= state.chunksTotal && allChunksGenerated) {
+      resetState();
+      broadcastState();
+    } else {
+      playNextChunk();
+    }
+  };
+
+  audio.onerror = () => {
+    URL.revokeObjectURL(blobUrl);
+    setError(`Playback failed on chunk ${currentChunkIndex + 1}`);
+  };
+
+  if (state.phase === "playing") {
+    audio.play();
+  }
+}
+
+async function fetchNewChunks(jobId, chunksCompleted) {
+  while (chunksFetched < chunksCompleted) {
+    const idx = chunksFetched;
+    try {
+      const blobUrl = await fetchChunkBlob(jobId, idx);
+      chunkQueue[idx] = blobUrl;
+      chunksFetched++;
+
+      if (
+        idx === currentChunkIndex &&
+        (state.phase === "playing" || state.phase === "polling")
+      ) {
+        if (state.phase === "polling") {
+          state.phase = "playing";
+          broadcastState();
+        }
+        playNextChunk();
+      }
+    } catch (err) {
+      setError(`Failed to fetch chunk ${idx}: ${err.message}`);
+      return;
+    }
+  }
+}
+
+function startPolling(jobId) {
+  pollTimer = setInterval(async () => {
+    try {
+      const status = await apiJson(`/api/tts/status/${jobId}`);
+      state.progress = status.progress;
+      state.chunksCompleted = status.chunks_completed;
+      state.chunksTotal = status.chunks_total;
+
+      if (status.status === "failed") {
+        stopPolling();
+        setError(status.error || "TTS generation failed");
+        return;
+      }
+
+      if (status.status === "complete") {
+        stopPolling();
+        allChunksGenerated = true;
+      }
+
+      broadcastState();
+      await fetchNewChunks(jobId, status.chunks_completed);
+    } catch (err) {
+      stopPolling();
+      setError(`Polling failed: ${err.message}`);
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+async function playFullAudio(jobId) {
   const serverUrl = await getServerUrl();
   const url = serverUrl.replace(/\/+$/, "") + `/api/tts/audio/${jobId}`;
   const response = await fetch(url);
@@ -132,30 +256,6 @@ async function playAudioBlob(jobId) {
   await audio.play();
 }
 
-function startPolling(jobId) {
-  pollTimer = setInterval(async () => {
-    try {
-      const status = await apiJson(`/api/tts/status/${jobId}`);
-      state.progress = status.progress;
-      state.chunksCompleted = status.chunks_completed;
-      state.chunksTotal = status.chunks_total;
-
-      if (status.status === "complete") {
-        stopPolling();
-        await playAudioBlob(jobId);
-      } else if (status.status === "failed") {
-        stopPolling();
-        setError(status.error || "TTS generation failed");
-      } else {
-        broadcastState();
-      }
-    } catch (err) {
-      stopPolling();
-      setError(`Polling failed: ${err.message}`);
-    }
-  }, POLL_INTERVAL_MS);
-}
-
 async function handleReadRequest(text, voice, speed) {
   stopAll();
 
@@ -181,7 +281,7 @@ async function handleReadRequest(text, voice, speed) {
     state.jobId = result.job_id;
 
     if (result.status === "complete") {
-      await playAudioBlob(result.job_id);
+      await playFullAudio(result.job_id);
     } else {
       state.phase = "polling";
       state.chunksTotal = 0;
@@ -273,6 +373,22 @@ browser.runtime.onMessage.addListener((message, _sender) => {
         .catch((err) => {
           setError(`Could not read page: ${err.message}`);
         });
+
+    case "pause":
+      if (state.phase === "playing") {
+        audio.pause();
+        state.phase = "paused";
+        broadcastState();
+      }
+      return Promise.resolve();
+
+    case "resume":
+      if (state.phase === "paused") {
+        state.phase = "playing";
+        broadcastState();
+        audio.play();
+      }
+      return Promise.resolve();
 
     case "stop":
       stopAll();

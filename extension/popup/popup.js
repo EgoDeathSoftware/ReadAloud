@@ -7,6 +7,7 @@ const speedRange = document.getElementById("speed-range");
 const speedValue = document.getElementById("speed-value");
 const btnSelection = document.getElementById("btn-selection");
 const btnPage = document.getElementById("btn-page");
+const btnPause = document.getElementById("btn-pause");
 const btnStop = document.getElementById("btn-stop");
 const progressSection = document.getElementById("progress-section");
 const progressFill = document.getElementById("progress-fill");
@@ -31,6 +32,7 @@ function renderState(s) {
     generating: "Generating audio...",
     polling: "Processing...",
     playing: "Playing",
+    paused: "Paused",
     error: "Error",
   };
 
@@ -39,15 +41,21 @@ function renderState(s) {
   statusDot.className = "dot";
   if (s.phase === "idle") statusDot.classList.add("dot-idle");
   else if (s.phase === "playing") statusDot.classList.add("dot-playing");
+  else if (s.phase === "paused") statusDot.classList.add("dot-active");
   else if (s.phase === "error") statusDot.classList.add("dot-error");
   else statusDot.classList.add("dot-active");
 
   const isActive = !["idle", "error"].includes(s.phase);
   btnSelection.disabled = isActive;
   btnPage.disabled = isActive;
+  btnPause.classList.toggle("hidden", s.phase !== "playing" && s.phase !== "paused");
+  btnPause.textContent = s.phase === "paused" ? "Resume" : "Pause";
   btnStop.classList.toggle("hidden", !isActive);
 
-  if (s.phase === "polling" && s.chunksTotal > 0) {
+  const showProgress =
+    s.chunksTotal > 1 &&
+    ["polling", "playing", "paused"].includes(s.phase);
+  if (showProgress) {
     progressSection.classList.remove("hidden");
     const pct = Math.round(s.progress * 100);
     progressFill.style.width = pct + "%";
@@ -137,6 +145,11 @@ btnPage.addEventListener("click", () => {
     voice: getVoice(),
     speed: getSpeed(),
   });
+});
+
+btnPause.addEventListener("click", () => {
+  const isPaused = btnPause.textContent === "Resume";
+  browser.runtime.sendMessage({ type: isPaused ? "resume" : "pause" });
 });
 
 btnStop.addEventListener("click", () => {

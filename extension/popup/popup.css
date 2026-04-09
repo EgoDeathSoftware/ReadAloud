@@ -111,6 +111,14 @@ header h1 {
   cursor: not-allowed;
 }
 
+#btn-pause {
+  background: #f59e0b;
+}
+
+#btn-pause:hover {
+  background: #d97706;
+}
+
 #btn-stop {
   background: #ef4444;
 }

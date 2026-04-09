@@ -1,0 +1,52 @@
+services:
+  readaloud:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      READALOUD_TTS_BASE_URL: ${READALOUD_TTS_BASE_URL:-http://kokoro:8880}
+      READALOUD_TTS_MODEL: ${READALOUD_TTS_MODEL:-kokoro}
+      READALOUD_TTS_DEFAULT_VOICE: ${READALOUD_TTS_DEFAULT_VOICE:-af_heart}
+      READALOUD_MAX_CHUNK_CHARS: ${READALOUD_MAX_CHUNK_CHARS:-4000}
+    restart: unless-stopped
+
+  kokoro-gpu:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
+    profiles: [local-gpu]
+    ports:
+      - "8881:8880"
+    networks:
+      default:
+        aliases:
+          - kokoro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  kokoro-cpu:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    profiles: [local-cpu]
+    ports:
+      - "8881:8880"
+    networks:
+      default:
+        aliases:
+          - kokoro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8880/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
