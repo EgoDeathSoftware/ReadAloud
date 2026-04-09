@@ -293,24 +293,23 @@ async function handleReadRequest(text, voice, speed) {
   }
 }
 
-async function handleReadPage(tabUrl, voice, speed) {
+async function handleReadPage(tabId, voice, speed) {
   stopAll();
   state.phase = "extracting";
   broadcastState();
 
   try {
-    const result = await apiJson("/api/extract", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: tabUrl }),
-    });
+    // Inject Readability.js first (defines the global), then run the extractor.
+    await browser.tabs.executeScript(tabId, { file: "Readability.js" });
+    const results = await browser.tabs.executeScript(tabId, { file: "content.js" });
+    const article = results && results[0];
 
-    if (!result.text || result.text.trim().length === 0) {
-      setError("No text could be extracted from this page");
+    if (!article || !article.text || article.text.trim().length === 0) {
+      setError("No article content could be extracted from this page");
       return;
     }
 
-    await handleReadRequest(result.text, voice, speed);
+    await handleReadRequest(article.text, voice, speed);
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
   }
@@ -333,8 +332,8 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const settings = await getSettings();
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
     handleReadRequest(info.selectionText, settings.voice, settings.speed);
-  } else if (info.menuItemId === "readaloud-page" && tab.url) {
-    handleReadPage(tab.url, settings.voice, settings.speed);
+  } else if (info.menuItemId === "readaloud-page" && tab.id) {
+    handleReadPage(tab.id, settings.voice, settings.speed);
   }
 });
 
@@ -368,7 +367,7 @@ browser.runtime.onMessage.addListener((message, _sender) => {
       return browser.tabs.query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
-          handleReadPage(tabs[0].url, message.voice, message.speed);
+          handleReadPage(tabs[0].id, message.voice, message.speed);
         })
         .catch((err) => {
           setError(`Could not read page: ${err.message}`);

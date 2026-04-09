@@ -1,9 +1,20 @@
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
+import httpx
 import trafilatura
 
 MAX_CHARS = 100_000
+
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
 
 @dataclass
@@ -11,6 +22,17 @@ class ExtractedContent:
     title: str | None
     text: str
     word_count: int
+
+
+def _fetch_with_httpx(url: str) -> str | None:
+    """Fetch a URL with browser-like headers as fallback when trafilatura fails."""
+    try:
+        with httpx.Client(follow_redirects=True, timeout=15) as client:
+            response = client.get(url, headers=_BROWSER_HEADERS)
+            response.raise_for_status()
+            return response.text
+    except httpx.HTTPError:
+        return None
 
 
 def extract_from_url(url: str) -> ExtractedContent:
@@ -26,6 +48,8 @@ def extract_from_url(url: str) -> ExtractedContent:
         ValueError: If the URL cannot be fetched or no content is found.
     """
     downloaded = trafilatura.fetch_url(url)
+    if downloaded is None:
+        downloaded = _fetch_with_httpx(url)
     if downloaded is None:
         raise ValueError(f"Could not fetch URL: {url}")
 
