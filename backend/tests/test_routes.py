@@ -149,7 +149,7 @@ def test_tts_chunk_audio(client):
     assert response.content == b"chunk-1-audio"
 
     response = client.get(f"/api/tts/audio/{job_id}/2")
-    assert response.status_code == 404
+    assert response.status_code == 503
 
     del jobs[job_id]
 

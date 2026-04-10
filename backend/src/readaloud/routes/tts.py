@@ -164,6 +164,6 @@ async def get_tts_chunk_audio(job_id: str, chunk_index: int) -> Response:
     audio = job.chunk_audio.get(chunk_index)
     if audio is None:
         raise HTTPException(
-            status_code=404, detail=f"Chunk {chunk_index} not ready"
+            status_code=503, detail=f"Chunk {chunk_index} not ready"
         )
     return Response(content=audio, media_type="audio/mpeg")

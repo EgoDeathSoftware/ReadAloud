@@ -6,5 +6,7 @@
   const docClone = document.cloneNode(true);
   const article = new Readability(docClone).parse(); // eslint-disable-line no-undef
   if (!article) return null;
-  return { title: article.title, text: article.textContent.trim() };
+  const MAX_CHARS = 50_000;
+  const text = article.textContent.trim().slice(0, MAX_CHARS);
+  return { title: article.title, text };
 })();
