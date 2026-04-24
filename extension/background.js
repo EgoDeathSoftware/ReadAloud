@@ -193,7 +193,7 @@ async function fetchNewChunks(jobId, chunksCompleted) {
         playNextChunk();
       }
     } catch (err) {
-      setError(`Failed to fetch chunk ${idx}: ${err.message}`);
+      setError(err.message);
       return;
     }
   }
