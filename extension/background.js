@@ -1,171 +1,47 @@
-"use strict";
-
-const DEFAULT_SERVER_URL = "http://localhost:8000";
-const POLL_INTERVAL_MS = 2000;
+import { pickAdapter } from "/lib/adapters/index.js";
+import { createPlayer } from "/lib/player.js";
+import { loadSettings } from "/lib/settings.js";
 
 const state = {
   phase: "idle",
-  jobId: null,
   progress: 0,
   chunksCompleted: 0,
   chunksTotal: 0,
   error: null,
 };
 
-let audio = new Audio();
-let pollTimer = null;
+const player = createPlayer({});
+let abortController = null;
 
 function resetState() {
   state.phase = "idle";
-  state.jobId = null;
   state.progress = 0;
   state.chunksCompleted = 0;
   state.chunksTotal = 0;
   state.error = null;
 }
 
+function broadcastState() {
+  browser.runtime.sendMessage({ type: "stateUpdate", state: { ...state } }).catch(() => {});
+}
+
+function setPhase(phase) {
+  state.phase = phase;
+  broadcastState();
+}
+
 function setError(message) {
-  stopPolling();
   state.phase = "error";
   state.error = message;
   broadcastState();
 }
 
-function broadcastState() {
-  browser.runtime.sendMessage({ type: "stateUpdate", state: { ...state } })
-    .catch(() => {});
-}
-
-async function getServerUrl() {
-  const result = await browser.storage.local.get("serverUrl");
-  return result.serverUrl || DEFAULT_SERVER_URL;
-}
-
-async function getSettings() {
-  const result = await browser.storage.local.get([
-    "serverUrl",
-    "defaultVoice",
-    "defaultSpeed",
-  ]);
-  return {
-    serverUrl: result.serverUrl || DEFAULT_SERVER_URL,
-    voice: result.defaultVoice || "",
-    speed: result.defaultSpeed || 1.0,
-  };
-}
-
-async function apiFetch(path, options = {}) {
-  const serverUrl = await getServerUrl();
-  const url = serverUrl.replace(/\/+$/, "") + path;
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`${response.status}: ${body}`);
-  }
-  return response;
-}
-
-async function apiJson(path, options = {}) {
-  const response = await apiFetch(path, options);
-  return response.json();
-}
-
-async function fetchVoices() {
-  const voices = await apiJson("/api/voices");
-  return voices;
-}
-
-async function healthCheck() {
-  const data = await apiJson("/api/health");
-  return data;
-}
-
-function stopPolling() {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
-}
-
-function revokeCurrentBlob() {
-  if (audio.src && audio.src.startsWith("blob:")) {
-    URL.revokeObjectURL(audio.src);
-  }
-}
-
-function stopPlayback() {
-  audio.pause();
-  audio.currentTime = 0;
-  audio.onended = null;
-  audio.onerror = null;
-  revokeCurrentBlob();
-  audio.src = "";
-}
-
 function stopAll() {
-  stopPolling();
-  stopPlayback();
+  abortController?.abort();
+  abortController = null;
+  player.stop();
   resetState();
   broadcastState();
-}
-
-function startPolling(jobId) {
-  pollTimer = setInterval(async () => {
-    try {
-      const status = await apiJson(`/api/tts/status/${jobId}`);
-      state.progress = status.progress;
-      state.chunksCompleted = status.chunks_completed;
-      state.chunksTotal = status.chunks_total;
-      broadcastState();
-
-      if (status.status === "failed") {
-        stopPolling();
-        setError(status.error || "TTS generation failed");
-        return;
-      }
-
-      if (status.status === "complete") {
-        stopPolling();
-        try {
-          await playFullAudio(jobId);
-        } catch (err) {
-          setError(`Playback failed: ${err.message}`);
-        }
-      }
-    } catch (err) {
-      stopPolling();
-      setError(`Polling failed: ${err.message}`);
-    }
-  }, POLL_INTERVAL_MS);
-}
-
-async function playFullAudio(jobId) {
-  const serverUrl = await getServerUrl();
-  const url = serverUrl.replace(/\/+$/, "") + `/api/tts/audio/${jobId}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch audio: ${response.status}`);
-  }
-  const blob = await response.blob();
-  const blobUrl = URL.createObjectURL(blob);
-
-  stopPlayback();
-  audio.src = blobUrl;
-
-  audio.onended = () => {
-    URL.revokeObjectURL(blobUrl);
-    resetState();
-    broadcastState();
-  };
-
-  audio.onerror = () => {
-    URL.revokeObjectURL(blobUrl);
-    setError("Audio playback failed");
-  };
-
-  state.phase = "playing";
-  broadcastState();
-  await audio.play();
 }
 
 async function handleReadRequest(text, voice, speed) {
@@ -176,39 +52,44 @@ async function handleReadRequest(text, voice, speed) {
     return;
   }
 
-  state.phase = "generating";
-  broadcastState();
+  const settings = await loadSettings();
+  const adapter = pickAdapter(settings);
+  abortController = new AbortController();
+
+  setPhase("generating");
+
+  const generator = adapter.synthesize({
+    text,
+    voice: voice || settings.defaultVoice,
+    speed: speed || settings.defaultSpeed,
+    settings,
+    signal: abortController.signal,
+    onProgress: ({ chunksCompleted, chunksTotal, progress }) => {
+      state.chunksCompleted = chunksCompleted;
+      state.chunksTotal = chunksTotal;
+      state.progress = progress;
+      if (state.phase === "generating" || state.phase === "playing") broadcastState();
+    },
+  });
 
   try {
-    const body = { text: text.trim() };
-    if (voice) body.voice = voice;
-    if (speed) body.speed = speed;
-
-    const result = await apiJson("/api/tts/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    state.jobId = result.job_id;
-
-    if (result.status === "complete") {
-      await playFullAudio(result.job_id);
-    } else {
-      state.phase = "polling";
-      state.chunksTotal = 0;
+    setPhase("playing");
+    await player.play(generator);
+    if (state.phase !== "error") {
+      resetState();
       broadcastState();
-      startPolling(result.job_id);
     }
   } catch (err) {
-    setError(`Generation failed: ${err.message}`);
+    if (err.name === "AbortError") return;
+    setError(err.message);
+  } finally {
+    abortController = null;
   }
 }
 
 async function handleReadPage(tabId, voice, speed) {
   stopAll();
-  state.phase = "extracting";
-  broadcastState();
+  setPhase("extracting");
 
   try {
     // Inject Readability.js first (defines the global), then run the extractor.
@@ -227,7 +108,6 @@ async function handleReadPage(tabId, voice, speed) {
   }
 }
 
-// Context menus
 browser.contextMenus.create({
   id: "readaloud-selection",
   title: "ReadAloud: Read Selection",
@@ -241,22 +121,22 @@ browser.contextMenus.create({
 });
 
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
-  const settings = await getSettings();
+  const settings = await loadSettings();
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
-    handleReadRequest(info.selectionText, settings.voice, settings.speed);
+    handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
-    handleReadPage(tab.id, settings.voice, settings.speed);
+    handleReadPage(tab.id, settings.defaultVoice, settings.defaultSpeed);
   }
 });
 
-// Message handler for popup
-browser.runtime.onMessage.addListener((message, _sender) => {
+browser.runtime.onMessage.addListener((message) => {
   switch (message.type) {
     case "getState":
       return Promise.resolve({ ...state });
 
     case "readSelection":
-      return browser.tabs.query({ active: true, currentWindow: true })
+      return browser.tabs
+        .query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
           return browser.tabs.executeScript(tabs[0].id, {
@@ -271,34 +151,25 @@ browser.runtime.onMessage.addListener((message, _sender) => {
           }
           handleReadRequest(text, message.voice, message.speed);
         })
-        .catch((err) => {
-          setError(`Could not read selection: ${err.message}`);
-        });
+        .catch((err) => setError(`Could not read selection: ${err.message}`));
 
     case "readPage":
-      return browser.tabs.query({ active: true, currentWindow: true })
+      return browser.tabs
+        .query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
           handleReadPage(tabs[0].id, message.voice, message.speed);
         })
-        .catch((err) => {
-          setError(`Could not read page: ${err.message}`);
-        });
+        .catch((err) => setError(`Could not read page: ${err.message}`));
 
     case "pause":
-      if (state.phase === "playing") {
-        audio.pause();
-        state.phase = "paused";
-        broadcastState();
-      }
+      player.pause();
+      if (player.phase === "paused") setPhase("paused");
       return Promise.resolve();
 
     case "resume":
-      if (state.phase === "paused") {
-        state.phase = "playing";
-        broadcastState();
-        audio.play();
-      }
+      player.resume();
+      if (player.phase === "playing") setPhase("playing");
       return Promise.resolve();
 
     case "stop":
@@ -306,14 +177,18 @@ browser.runtime.onMessage.addListener((message, _sender) => {
       return Promise.resolve();
 
     case "getVoices":
-      return fetchVoices().catch((err) => {
-        return { error: err.message };
-      });
+      return loadSettings()
+        .then((settings) => pickAdapter(settings).listVoices(settings))
+        .catch((err) => ({ error: err.message }));
 
     case "healthCheck":
-      return healthCheck().catch((err) => {
-        return { status: "unreachable", error: err.message };
-      });
+      return loadSettings()
+        .then((settings) => pickAdapter(settings).checkHealth(settings))
+        .then((result) => ({
+          status: result.ok ? "healthy" : "unhealthy",
+          detail: result.detail,
+        }))
+        .catch((err) => ({ status: "unreachable", error: err.message }));
 
     default:
       return Promise.resolve();
