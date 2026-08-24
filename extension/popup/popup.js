@@ -16,6 +16,7 @@ const errorSection = document.getElementById("error-section");
 const errorText = document.getElementById("error-text");
 const serverDot = document.getElementById("server-dot");
 const serverText = document.getElementById("server-text");
+const btnSettings = document.getElementById("btn-settings");
 
 function getVoice() {
   return voiceSelect.value || undefined;
@@ -154,6 +155,10 @@ btnPause.addEventListener("click", () => {
 
 btnStop.addEventListener("click", () => {
   browser.runtime.sendMessage({ type: "stop" });
+});
+
+btnSettings.addEventListener("click", () => {
+  browser.runtime.openOptionsPage();
 });
 
 browser.runtime.onMessage.addListener((message) => {

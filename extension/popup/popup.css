@@ -32,6 +32,24 @@ header h1 {
 #status-text {
   font-size: 12px;
   color: #666;
+  flex: 1;
+}
+
+#btn-settings {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  color: #666;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+#btn-settings:hover {
+  background: #f1f5f9;
+  color: #1a1a1a;
 }
 
 .dot {
