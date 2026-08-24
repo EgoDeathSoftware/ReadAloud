@@ -82,9 +82,41 @@ Configure the backend via environment variables:
 | `READALOUD_TTS_BASE_URL` | `http://localhost:8880` | TTS server URL |
 | `READALOUD_TTS_MODEL` | `kokoro` | Model name |
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` | Default voice ID |
+| `READALOUD_TTS_API_KEY` | _(blank)_ | Bearer token for the TTS server. Blank for Kokoro; required for OpenAI/Groq |
 | `READALOUD_MAX_CHUNK_CHARS` | `4000` | Max characters per TTS request |
 
 Frontend settings (voice, speed, server URL) are configurable in the Settings panel and persisted to `localStorage`.
+
+## Extension TTS targets
+
+The Firefox extension can send TTS work to either of two places, selected in its options page.
+
+**ReadAloud backend** (default) — the extension talks to the FastAPI container at
+`http://localhost:8000`. The backend chunks long text, calls the TTS server, and the extension
+streams each finished chunk. Use this when you want the API key held server-side, or when the
+TTS server is not reachable from the browser.
+
+**Direct endpoint** — the extension calls `POST /v1/audio/speech` itself, chunking in the
+browser. Point it at any OpenAI-compatible server:
+
+| Server | Endpoint URL | Model | API key |
+|---|---|---|---|
+| Kokoro (this repo's compose profiles) | `http://localhost:8880` | `kokoro` | none |
+| OpenAI | `https://api.openai.com` | `gpt-4o-mini-tts` | required |
+| Groq | `https://api.groq.com/openai` | `playai-tts` | required |
+
+Providers with their own request schema (ElevenLabs, Google, Polly) are not supported — see
+[docs/PROVIDERS.md](docs/PROVIDERS.md).
+
+### Extension development
+
+```bash
+cd extension
+npm install     # vitest only; the extension itself ships no runtime dependencies
+npm test
+```
+
+Load it in Firefox via `about:debugging` → This Firefox → Load Temporary Add-on → `extension/manifest.json`.
 
 ## Development
 

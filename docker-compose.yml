@@ -8,13 +8,14 @@ services:
       READALOUD_TTS_MODEL: ${READALOUD_TTS_MODEL:-kokoro}
       READALOUD_TTS_DEFAULT_VOICE: ${READALOUD_TTS_DEFAULT_VOICE:-af_heart}
       READALOUD_MAX_CHUNK_CHARS: ${READALOUD_MAX_CHUNK_CHARS:-4000}
+      READALOUD_TTS_API_KEY: ${READALOUD_TTS_API_KEY:-}
     restart: unless-stopped
 
   kokoro-gpu:
     image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
     profiles: [local-gpu]
     ports:
-      - "8881:8880"
+      - "8880:8880"
     networks:
       default:
         aliases:
@@ -38,7 +39,7 @@ services:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     profiles: [local-cpu]
     ports:
-      - "8881:8880"
+      - "8880:8880"
     networks:
       default:
         aliases:
