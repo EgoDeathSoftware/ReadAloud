@@ -72,15 +72,6 @@ export function getSettings(): Promise<Settings> {
   return request<Settings>("/api/settings");
 }
 
-export function updateSettings(
-  settings: Partial<Settings>,
-): Promise<Settings> {
-  return request<Settings>("/api/settings", {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
-}
-
 export function checkHealth(): Promise<{
   status: string;
   tts_server: string;

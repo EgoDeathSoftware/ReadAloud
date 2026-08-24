@@ -36,7 +36,6 @@ export interface VoiceInfo {
 }
 
 export interface Settings {
-  tts_mode: "local" | "remote";
   tts_base_url: string;
   tts_model: string;
   tts_default_voice: string;

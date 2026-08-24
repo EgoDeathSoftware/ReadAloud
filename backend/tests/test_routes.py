@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -68,22 +69,22 @@ def test_voices_fallback(client):
     assert "alloy" in ids
 
 
-def test_settings_get(client):
+def test_settings_get_returns_config(client):
     response = client.get("/api/settings")
     assert response.status_code == 200
-    data = response.json()
-    assert "tts_mode" in data
-    assert "tts_base_url" in data
+    assert set(response.json()) == {"tts_base_url", "tts_model", "tts_default_voice"}
 
 
-def test_settings_update(client):
-    response = client.put(
-        "/api/settings",
-        json={"tts_model": "new-model"},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["tts_model"] == "new-model"
+def test_settings_put_is_gone(client):
+    response = client.put("/api/settings", json={"tts_base_url": "http://evil.test"})
+    assert response.status_code == 405
+
+
+def test_settings_get_never_leaks_api_key(client, monkeypatch):
+    from readaloud.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "TTS_API_KEY", "sk-secret")
+    assert "sk-secret" not in json.dumps(client.get("/api/settings").json())
 
 
 def test_tts_generate_short_text(client):
