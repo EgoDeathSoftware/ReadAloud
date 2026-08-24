@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 
-from readaloud.config import settings
+from readaloud.config import auth_headers, settings
 
 
 class TtsClient:
@@ -41,7 +41,7 @@ class TtsClient:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                response = await self._client.post(url, json=payload)
+                response = await self._client.post(url, json=payload, headers=auth_headers())
                 response.raise_for_status()
                 return response.content
             except (httpx.HTTPError, httpx.StreamError) as exc:
@@ -49,9 +49,7 @@ class TtsClient:
                 if attempt < 2:
                     await asyncio.sleep(2**attempt)
 
-        raise RuntimeError(
-            f"TTS generation failed after 3 attempts: {last_error}"
-        )
+        raise RuntimeError(f"TTS generation failed after 3 attempts: {last_error}")
 
     async def close(self) -> None:
         await self._client.aclose()

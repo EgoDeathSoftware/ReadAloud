@@ -1,7 +1,7 @@
 import httpx
 from fastapi import APIRouter
 
-from readaloud.config import settings
+from readaloud.config import auth_headers, settings
 from readaloud.models.schemas import VoiceInfo
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def list_voices() -> list[VoiceInfo]:
     async with httpx.AsyncClient(timeout=5.0) as client:
         try:
             resp = await client.get(
-                f"{settings.TTS_BASE_URL}/v1/audio/voices"
+                f"{settings.TTS_BASE_URL}/v1/audio/voices", headers=auth_headers()
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -38,9 +38,7 @@ async def list_voices() -> list[VoiceInfo]:
             pass
 
         try:
-            resp = await client.get(
-                f"{settings.TTS_BASE_URL}/v1/models"
-            )
+            resp = await client.get(f"{settings.TTS_BASE_URL}/v1/models", headers=auth_headers())
             if resp.status_code == 200:
                 data = resp.json()
                 models = data.get("data", []) if isinstance(data, dict) else []

@@ -38,10 +38,7 @@ JOB_TTL_SECONDS = 3600
 
 def _cleanup_old_jobs() -> None:
     now = time.time()
-    expired = [
-        jid for jid, job in jobs.items()
-        if now - job.created_at > JOB_TTL_SECONDS
-    ]
+    expired = [jid for jid, job in jobs.items() if now - job.created_at > JOB_TTL_SECONDS]
     for jid in expired:
         del jobs[jid]
 
@@ -90,9 +87,7 @@ async def generate_tts(
     if len(request.text) <= settings.MAX_CHUNK_CHARS:
         client = TtsClient()
         try:
-            audio = await client.generate_speech(
-                request.text, voice, model, request.speed
-            )
+            audio = await client.generate_speech(request.text, voice, model, request.speed)
         finally:
             await client.close()
 
@@ -116,9 +111,7 @@ async def generate_tts(
         status="processing",
         chunks_total=len(chunks),
     )
-    background_tasks.add_task(
-        _process_long_text, job_id, chunks, voice, model, request.speed
-    )
+    background_tasks.add_task(_process_long_text, job_id, chunks, voice, model, request.speed)
     return TtsGenerateResponse(
         job_id=job_id,
         status="processing",
@@ -149,9 +142,7 @@ async def get_tts_audio(job_id: str) -> Response:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != "complete" or job.audio_data is None:
-        raise HTTPException(
-            status_code=400, detail=f"Job not ready: {job.status}"
-        )
+        raise HTTPException(status_code=400, detail=f"Job not ready: {job.status}")
     return Response(content=job.audio_data, media_type="audio/mpeg")
 
 
@@ -163,7 +154,5 @@ async def get_tts_chunk_audio(job_id: str, chunk_index: int) -> Response:
         raise HTTPException(status_code=404, detail="Job not found")
     audio = job.chunk_audio.get(chunk_index)
     if audio is None:
-        raise HTTPException(
-            status_code=503, detail=f"Chunk {chunk_index} not ready"
-        )
+        raise HTTPException(status_code=503, detail=f"Chunk {chunk_index} not ready")
     return Response(content=audio, media_type="audio/mpeg")
