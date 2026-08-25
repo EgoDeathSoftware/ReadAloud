@@ -30,11 +30,12 @@ export function App() {
 
   function handleGenerate() {
     if (!text.trim()) return;
+    // Speed is applied by the player via playbackRate, never at generation time —
+    // sending it here too would multiply the two rates together.
     tts.generate(
       text,
       voice || undefined,
       settings.tts_model || undefined,
-      settings.speed,
     );
   }
 

@@ -7,14 +7,29 @@ Line references are to the state of the tree at the time of review and may drift
 
 ## Bugs
 
-### Speed applies twice in the web app
+### Fixed on 2026-08-25
 
-`frontend/src/App.tsx:37` sends `settings.speed` to the TTS server while
-`frontend/src/components/AudioPlayer.tsx:12` applies its own `playbackRate` on top. Setting 1.5 in
-both places plays at 2.25×.
+- **Speed applies twice in the web app** — the web app no longer sends `speed` at generation time;
+  `AudioPlayer`'s `playbackRate` is the only speed control, matching the extension (commit 9f6d03d).
+  `speed` is gone from the settings store, `useTts.generate`, and `TtsGenerateRequest`.
+- **SSRF in `/api/extract`** — new `services/url_guard.py` rejects non-http(s) schemes and any host
+  resolving to a private, loopback, link-local, multicast, reserved, or unspecified address
+  (including IPv4-mapped IPv6 forms such as `::ffff:127.0.0.1`). Every resolved address is checked,
+  not just the first.
+- **Blocking I/O in an async route** — `extract_from_url` is now `async` and fetches with
+  `httpx.AsyncClient`. `trafilatura.fetch_url` is gone; trafilatura now only parses HTML we
+  fetched ourselves.
 
-The extension already moved to playback-rate-only (commit 9f6d03d). Do the same on the web side:
-drop `speed` from the generate call and let the player own it.
+Redirects are followed manually (`follow_redirects=False`, max 5 hops) so each hop revalidates —
+otherwise a public URL could bounce the request to `127.0.0.1`.
+
+Two things the guard does *not* cover, both still open:
+
+- **DNS rebinding (TOCTOU).** The guard resolves the host to check it, then httpx resolves again to
+  connect. A hostname with a very short TTL can return a public address to the first lookup and a
+  private one to the second. Closing this means pinning the validated IP through a custom transport.
+- **`allow_origins=["*"]`** (`backend/src/readaloud/main.py:13`) is unchanged, so any page the user
+  visits can still drive the API — it just can no longer reach the internal network through it.
 
 ### Concatenated MP3s aren't seekable
 
@@ -26,13 +41,6 @@ articles that need them.
 Either write a correct Xing/VBR header, or return per-chunk durations from the API and let the
 client build its own timeline.
 
-### Blocking I/O in an async route
-
-`extract_from_url` (`backend/src/readaloud/services/text_extractor.py:38`) calls the synchronous
-`trafilatura.fetch_url` and a sync `httpx.Client` from inside `async def extract_text`. One slow
-page stalls the event loop, including in-flight TTS jobs. Wrap in `run_in_threadpool` or switch to
-`httpx.AsyncClient`.
-
 ### Unbounded in-memory job store
 
 `jobs` (`backend/src/readaloud/routes/tts.py:34`) holds every chunk's audio *and* the stitched copy
@@ -40,15 +48,6 @@ page stalls the event loop, including in-flight TTS jobs. Wrap in `run_in_thread
 arrives. A few 100k-char articles hold hundreds of MB indefinitely.
 
 Spill audio to a temp dir keyed by job id, and drop `chunk_audio` once the stitch completes.
-
-### SSRF in `/api/extract`
-
-An arbitrary user-supplied URL is fetched server-side with no scheme or host filtering, so it
-reaches `localhost`, `169.254.169.254`, and anything else on the host network. Combined with
-`allow_origins=["*"]` (`backend/src/readaloud/main.py:13`), any page the user visits can drive it
-whenever the backend is reachable.
-
-Block non-http(s) schemes and private/link-local addresses after DNS resolution.
 
 ## Improvements
 

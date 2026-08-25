@@ -10,7 +10,7 @@ router = APIRouter()
 async def extract_text(request: ExtractRequest) -> ExtractResponse:
     """Extract text content from a URL."""
     try:
-        result = extract_from_url(request.url)
+        result = await extract_from_url(request.url)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ExtractResponse(
