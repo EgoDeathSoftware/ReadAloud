@@ -39,14 +39,6 @@ class VoiceInfo(BaseModel):
 
 
 class SettingsResponse(BaseModel):
-    tts_mode: str
     tts_base_url: str
     tts_model: str
     tts_default_voice: str
-
-
-class SettingsUpdateRequest(BaseModel):
-    tts_mode: str | None = None
-    tts_base_url: str | None = None
-    tts_model: str | None = None
-    tts_default_voice: str | None = None

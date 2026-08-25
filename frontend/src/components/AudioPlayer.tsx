@@ -5,10 +5,12 @@ interface AudioPlayerProps {
 }
 
 const SPEED_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+const SKIP_SECONDS = 15;
 
 export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   useEffect(() => {
     if (audioUrl && audioRef.current) {
@@ -27,6 +29,28 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
 
   if (audioUrl === null) return null;
 
+  const skip = (seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.min(
+      Math.max(audio.currentTime + seconds, 0),
+      audio.duration || Infinity,
+    );
+  };
+
+  const togglePlayStop = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      audio.currentTime = 0;
+    } else {
+      audio.play().catch(() => {
+        // Autoplay may be blocked by browser policy
+      });
+    }
+  };
+
   return (
     <div className="audio-player">
       <audio
@@ -34,7 +58,36 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
         className="audio-player__element"
         controls
         src={audioUrl}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => setIsPlaying(false)}
       />
+      <div className="audio-player__transport">
+        <button
+          className="audio-player__transport-btn"
+          onClick={() => skip(-SKIP_SECONDS)}
+          aria-label={`Rewind ${SKIP_SECONDS} seconds`}
+          title={`Rewind ${SKIP_SECONDS}s`}
+        >
+          «{SKIP_SECONDS}
+        </button>
+        <button
+          className="audio-player__transport-btn audio-player__transport-btn--primary"
+          onClick={togglePlayStop}
+          aria-label={isPlaying ? "Stop" : "Play"}
+          title={isPlaying ? "Stop" : "Play"}
+        >
+          {isPlaying ? "■" : "▶"}
+        </button>
+        <button
+          className="audio-player__transport-btn"
+          onClick={() => skip(SKIP_SECONDS)}
+          aria-label={`Fast forward ${SKIP_SECONDS} seconds`}
+          title={`Forward ${SKIP_SECONDS}s`}
+        >
+          {SKIP_SECONDS}»
+        </button>
+      </div>
       <div className="audio-player__speed">
         <span className="audio-player__speed-label">Speed</span>
         <div className="audio-player__speed-steps">

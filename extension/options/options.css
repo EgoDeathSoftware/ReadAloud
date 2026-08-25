@@ -105,3 +105,13 @@ h1 {
 .hidden {
   display: none !important;
 }
+
+.radio {
+  display: block;
+  font-weight: normal;
+  margin: 4px 0;
+}
+
+.hidden {
+  display: none;
+}

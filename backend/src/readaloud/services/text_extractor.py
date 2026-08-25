@@ -69,9 +69,7 @@ def extract_from_url(url: str) -> ExtractedContent:
 
 def _extract_title(downloaded: str) -> str | None:
     """Try to extract the document title from XML metadata."""
-    metadata = trafilatura.extract(
-        downloaded, output_format="xml", include_comments=False
-    )
+    metadata = trafilatura.extract(downloaded, output_format="xml", include_comments=False)
     if not metadata:
         return None
     try:

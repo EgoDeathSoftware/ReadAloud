@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from readaloud.config import auth_headers, settings
 from readaloud.services.tts_client import TtsClient
 
 
@@ -49,3 +50,46 @@ async def test_generate_speech_raises_after_max_retries(client):
             await client.generate_speech("Hello")
     assert mock_post.call_count == 3
     await client.close()
+
+
+def test_auth_headers_empty_when_no_key(monkeypatch):
+    monkeypatch.setattr(settings, "TTS_API_KEY", "")
+    assert auth_headers() == {}
+
+
+def test_auth_headers_bearer_when_key_set(monkeypatch):
+    monkeypatch.setattr(settings, "TTS_API_KEY", "sk-test-123")
+    assert auth_headers() == {"Authorization": "Bearer sk-test-123"}
+
+
+async def _capture_request_headers(monkeypatch, api_key: str) -> dict[str, str]:
+    """Run one generate_speech call against a mock transport, returning the headers sent."""
+    monkeypatch.setattr(settings, "TTS_API_KEY", api_key)
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.headers)
+        return httpx.Response(200, content=b"ID3audio")
+
+    tts = TtsClient()
+    await tts.close()
+    tts._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        audio = await tts.generate_speech("hello", "af_heart", "kokoro", 1.0)
+    finally:
+        await tts.close()
+
+    assert audio == b"ID3audio"
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_generate_speech_sends_bearer_token(monkeypatch):
+    seen = await _capture_request_headers(monkeypatch, "sk-test-123")
+    assert seen["authorization"] == "Bearer sk-test-123"
+
+
+@pytest.mark.asyncio
+async def test_generate_speech_omits_auth_header_when_no_key(monkeypatch):
+    seen = await _capture_request_headers(monkeypatch, "")
+    assert "authorization" not in seen

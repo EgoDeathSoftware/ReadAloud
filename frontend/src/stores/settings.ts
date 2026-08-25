@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 interface SettingsState {
-  tts_mode: "local" | "remote";
   tts_base_url: string;
   tts_model: string;
   tts_default_voice: string;
@@ -13,7 +12,6 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      tts_mode: "local",
       tts_base_url: "http://localhost:8880",
       tts_model: "kokoro",
       tts_default_voice: "af_heart",

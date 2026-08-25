@@ -10,8 +10,29 @@
     <h1>ReadAloud Settings</h1>
 
     <div class="field">
-      <label for="server-url">Server URL</label>
-      <input type="url" id="server-url" placeholder="http://localhost:8000">
+      <label>TTS Target</label>
+      <label class="radio">
+        <input type="radio" name="tts-target" value="backend" checked>
+        ReadAloud backend
+      </label>
+      <label class="radio">
+        <input type="radio" name="tts-target" value="direct">
+        Direct OpenAI-compatible endpoint
+      </label>
+    </div>
+
+    <div class="field" id="backend-fields">
+      <label for="backend-url">Backend URL</label>
+      <input type="url" id="backend-url" placeholder="http://localhost:8000">
+    </div>
+
+    <div class="field hidden" id="direct-fields">
+      <label for="direct-url">Endpoint URL</label>
+      <input type="url" id="direct-url" placeholder="http://localhost:8880">
+      <label for="direct-model">Model</label>
+      <input type="text" id="direct-model" placeholder="kokoro">
+      <label for="direct-api-key">API Key (leave blank for Kokoro)</label>
+      <input type="password" id="direct-api-key" autocomplete="off" placeholder="sk-...">
     </div>
 
     <div class="field">
@@ -33,6 +54,6 @@
 
     <div id="message" class="hidden"></div>
   </div>
-  <script src="options.js"></script>
+  <script type="module" src="options.js"></script>
 </body>
 </html>

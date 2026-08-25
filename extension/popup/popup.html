@@ -10,6 +10,7 @@
       <h1>ReadAloud</h1>
       <span id="status-dot" class="dot dot-idle"></span>
       <span id="status-text">Idle</span>
+      <button id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
     </header>
 
     <div class="controls">
@@ -23,8 +24,13 @@
     <div class="actions">
       <button id="btn-selection">Read Selection</button>
       <button id="btn-page">Read Page</button>
-      <button id="btn-pause" class="hidden">Pause</button>
-      <button id="btn-stop" class="hidden">Stop</button>
+    </div>
+
+    <div class="transport hidden" id="transport-section">
+      <button id="btn-rewind" title="Rewind 15s" aria-label="Rewind 15 seconds">«15</button>
+      <button id="btn-pause" title="Pause" aria-label="Pause">❚❚</button>
+      <button id="btn-stop" title="Stop" aria-label="Stop">■</button>
+      <button id="btn-forward" title="Forward 15s" aria-label="Forward 15 seconds">15»</button>
     </div>
 
     <div id="progress-section" class="hidden">

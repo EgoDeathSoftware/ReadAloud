@@ -63,6 +63,22 @@ pnpm preview                     # Preview production build
 **Voice list:**
 - GET `/api/voices` → tries TTS server `/v1/audio/voices`, falls back to `/v1/models`, then hardcoded defaults
 
+### Extension (`extension/`)
+
+Firefox WebExtension, Manifest V2 with a background *page* (`background.html`) so all scripts load
+as ES modules. Imports are extension-root-absolute (`/lib/foo.js`), which resolves both in the
+browser and under Vite/vitest.
+
+- `lib/adapters/` — TTS adapters. `backend.js` speaks the FastAPI job API; `openai.js` calls
+  `POST /v1/audio/speech` directly. `index.js` picks one from `settings.ttsTarget`.
+- `lib/player.js` — plays the adapters' blob stream sequentially with one chunk of lookahead
+- `lib/chunker.js` — JS port of `text_chunker.py`, used only by the direct adapter
+- `lib/settings.js` — `storage.local` schema and defaults
+- `background.js` — orchestration only; owns state and the message API used by the popup
+
+Both adapters expose `synthesize()` as an async generator yielding `{audio, index, total}`, so the
+player is target-agnostic. Tests: `cd extension && npm test` (vitest).
+
 ### TTS Server Integration
 
 Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:8880`. Endpoint: `POST /v1/audio/speech` with `{model, input, voice, speed, response_format: "mp3"}`.
@@ -74,6 +90,7 @@ Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:888
 | `READALOUD_TTS_BASE_URL` | `http://localhost:8880` |
 | `READALOUD_TTS_MODEL` | `kokoro` |
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` |
+| `READALOUD_TTS_API_KEY` | _(blank)_ |
 | `READALOUD_MAX_CHUNK_CHARS` | `4000` |
 
 In production, the FastAPI backend serves the frontend's `dist/` directory as static files.

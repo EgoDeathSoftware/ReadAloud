@@ -9,6 +9,10 @@ const btnSelection = document.getElementById("btn-selection");
 const btnPage = document.getElementById("btn-page");
 const btnPause = document.getElementById("btn-pause");
 const btnStop = document.getElementById("btn-stop");
+const btnRewind = document.getElementById("btn-rewind");
+const btnForward = document.getElementById("btn-forward");
+const transportSection = document.getElementById("transport-section");
+const SKIP_SECONDS = 15;
 const progressSection = document.getElementById("progress-section");
 const progressFill = document.getElementById("progress-fill");
 const progressText = document.getElementById("progress-text");
@@ -16,6 +20,7 @@ const errorSection = document.getElementById("error-section");
 const errorText = document.getElementById("error-text");
 const serverDot = document.getElementById("server-dot");
 const serverText = document.getElementById("server-text");
+const btnSettings = document.getElementById("btn-settings");
 
 function getVoice() {
   return voiceSelect.value || undefined;
@@ -48,9 +53,10 @@ function renderState(s) {
   const isActive = !["idle", "error"].includes(s.phase);
   btnSelection.disabled = isActive;
   btnPage.disabled = isActive;
-  btnPause.classList.toggle("hidden", s.phase !== "playing" && s.phase !== "paused");
-  btnPause.textContent = s.phase === "paused" ? "Resume" : "Pause";
-  btnStop.classList.toggle("hidden", !isActive);
+  transportSection.classList.toggle("hidden", s.phase !== "playing" && s.phase !== "paused");
+  btnPause.textContent = s.phase === "paused" ? "▶" : "❚❚";
+  btnPause.title = s.phase === "paused" ? "Resume" : "Pause";
+  btnPause.setAttribute("aria-label", btnPause.title);
 
   const showProgress =
     s.chunksTotal > 1 &&
@@ -119,8 +125,9 @@ async function checkServer() {
 }
 
 speedRange.addEventListener("input", () => {
-  const val = parseFloat(speedRange.value).toFixed(1);
-  speedValue.textContent = val;
+  const speed = parseFloat(speedRange.value);
+  speedValue.textContent = speed.toFixed(1);
+  browser.runtime.sendMessage({ type: "setSpeed", speed });
 });
 
 speedRange.addEventListener("change", () => {
@@ -154,6 +161,18 @@ btnPause.addEventListener("click", () => {
 
 btnStop.addEventListener("click", () => {
   browser.runtime.sendMessage({ type: "stop" });
+});
+
+btnRewind.addEventListener("click", () => {
+  browser.runtime.sendMessage({ type: "skip", seconds: -SKIP_SECONDS });
+});
+
+btnForward.addEventListener("click", () => {
+  browser.runtime.sendMessage({ type: "skip", seconds: SKIP_SECONDS });
+});
+
+btnSettings.addEventListener("click", () => {
+  browser.runtime.openOptionsPage();
 });
 
 browser.runtime.onMessage.addListener((message) => {
