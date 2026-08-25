@@ -11,6 +11,7 @@ export function createPlayer({ audioElement } = {}) {
   let phase = "idle";
   let stopped = false;
   let settleCurrent = null;
+  let rate = 1.0;
 
   function releaseUrl() {
     if (currentUrl) {
@@ -27,6 +28,7 @@ export function createPlayer({ audioElement } = {}) {
       audio.onended = () => resolve();
       audio.onerror = () => reject(new Error("Audio playback failed"));
       audio.src = currentUrl;
+      audio.playbackRate = rate;
       audio.play().catch(reject);
     });
   }
@@ -75,6 +77,11 @@ export function createPlayer({ audioElement } = {}) {
       if (phase !== "paused") return;
       phase = "playing";
       audio.play();
+    },
+
+    setSpeed(value) {
+      rate = value;
+      audio.playbackRate = rate;
     },
 
     stop() {

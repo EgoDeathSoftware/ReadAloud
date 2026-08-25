@@ -120,8 +120,9 @@ async function checkServer() {
 }
 
 speedRange.addEventListener("input", () => {
-  const val = parseFloat(speedRange.value).toFixed(1);
-  speedValue.textContent = val;
+  const speed = parseFloat(speedRange.value);
+  speedValue.textContent = speed.toFixed(1);
+  browser.runtime.sendMessage({ type: "setSpeed", speed });
 });
 
 speedRange.addEventListener("change", () => {

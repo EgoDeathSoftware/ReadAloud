@@ -88,6 +88,25 @@ describe("createPlayer", () => {
     await done;
   });
 
+  it("applies speed changes to the current and subsequent chunks", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+
+    const done = player.play(chunks(2));
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+
+    player.setSpeed(1.5);
+    expect(audio.playbackRate).toBe(1.5);
+
+    audio.finish();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2));
+    expect(audio.playbackRate).toBe(1.5);
+
+    audio.finish();
+    await done;
+  });
+
   it("stops mid-stream without playing later chunks", async () => {
     setupObjectUrls();
     const audio = fakeAudio();

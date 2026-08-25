@@ -31,7 +31,6 @@ function synth(overrides = {}) {
   return openaiAdapter.synthesize({
     text: "Hello.",
     voice: "af_heart",
-    speed: 1,
     settings,
     signal: new AbortController().signal,
     onProgress: () => {},
@@ -89,7 +88,6 @@ describe("synthesize", () => {
     const results = await collect(
       synth({
         text: "A".repeat(5000) + "\n\n" + "B".repeat(100),
-        speed: 1.2,
         onProgress: (p) => progress.push(p),
       }),
     );
@@ -101,7 +99,6 @@ describe("synthesize", () => {
     expect(calls[0].body).toMatchObject({
       model: "kokoro",
       voice: "af_heart",
-      speed: 1.2,
       response_format: "mp3",
     });
     expect(progress.at(-1)).toMatchObject({ progress: 1 });

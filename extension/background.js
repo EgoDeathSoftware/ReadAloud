@@ -56,12 +56,12 @@ async function handleReadRequest(text, voice, speed) {
   const adapter = pickAdapter(settings);
   abortController = new AbortController();
 
+  player.setSpeed(speed || settings.defaultSpeed);
   setPhase("generating");
 
   const generator = adapter.synthesize({
     text,
     voice: voice || settings.defaultVoice,
-    speed: speed || settings.defaultSpeed,
     settings,
     signal: abortController.signal,
     onProgress: ({ chunksCompleted, chunksTotal, progress }) => {
@@ -161,6 +161,10 @@ browser.runtime.onMessage.addListener((message) => {
           handleReadPage(tabs[0].id, message.voice, message.speed);
         })
         .catch((err) => setError(`Could not read page: ${err.message}`));
+
+    case "setSpeed":
+      player.setSpeed(message.speed);
+      return Promise.resolve();
 
     case "pause":
       player.pause();

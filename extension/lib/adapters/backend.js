@@ -52,10 +52,9 @@ export const backendAdapter = {
     }
   },
 
-  async *synthesize({ text, voice, speed, settings, signal, onProgress }) {
+  async *synthesize({ text, voice, settings, signal, onProgress }) {
     const body = { text: text.trim() };
     if (voice) body.voice = voice;
-    if (speed) body.speed = speed;
 
     const job = await backendJson(settings, "/api/tts/generate", {
       method: "POST",

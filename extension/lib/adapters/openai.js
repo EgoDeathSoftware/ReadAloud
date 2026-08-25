@@ -112,13 +112,13 @@ export const openaiAdapter = {
     return { ok: false, detail: "TTS server unreachable" };
   },
 
-  async *synthesize({ text, voice, speed, settings, signal, onProgress }) {
+  async *synthesize({ text, voice, settings, signal, onProgress }) {
     const chunks = chunkText(text, MAX_INPUT_CHARS);
     const total = chunks.length;
     onProgress({ chunksCompleted: 0, chunksTotal: total, progress: 0 });
 
     for (let index = 0; index < total; index++) {
-      const audio = await requestChunk(chunks[index], voice, speed, settings, signal);
+      const audio = await requestChunk(chunks[index], voice, settings, signal);
       onProgress({
         chunksCompleted: index + 1,
         chunksTotal: total,
@@ -129,13 +129,12 @@ export const openaiAdapter = {
   },
 };
 
-async function requestChunk(input, voice, speed, settings, signal) {
+async function requestChunk(input, voice, settings, signal) {
   const url = `${settings.directUrl}/v1/audio/speech`;
   const body = JSON.stringify({
     model: settings.directModel || "kokoro",
     input,
     voice,
-    speed,
     response_format: "mp3",
   });
 

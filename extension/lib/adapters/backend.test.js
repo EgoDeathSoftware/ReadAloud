@@ -25,7 +25,6 @@ function run(overrides = {}) {
     backendAdapter.synthesize({
       text: "Hello.",
       voice: "af_heart",
-      speed: 1,
       settings,
       signal: new AbortController().signal,
       onProgress: () => {},
