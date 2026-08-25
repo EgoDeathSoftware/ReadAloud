@@ -84,6 +84,12 @@ export function createPlayer({ audioElement } = {}) {
       audio.playbackRate = rate;
     },
 
+    skip(seconds) {
+      if (phase !== "playing" && phase !== "paused") return;
+      const duration = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+      audio.currentTime = Math.min(Math.max(audio.currentTime + seconds, 0), duration);
+    },
+
     stop() {
       stopped = true;
       audio.pause();

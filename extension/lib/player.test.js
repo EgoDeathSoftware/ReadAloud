@@ -7,6 +7,8 @@ function fakeAudio() {
   return {
     src: "",
     paused: true,
+    currentTime: 0,
+    duration: 100,
     onended: null,
     onerror: null,
     played: [],
@@ -119,6 +121,39 @@ describe("createPlayer", () => {
 
     expect(audio.play).toHaveBeenCalledTimes(1);
     expect(player.phase).toBe("idle");
+  });
+
+  it("skips forward and backward within the current chunk, clamped to bounds", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+
+    const done = player.play(chunks(1));
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+
+    audio.currentTime = 10;
+    player.skip(15);
+    expect(audio.currentTime).toBe(25);
+
+    player.skip(-100);
+    expect(audio.currentTime).toBe(0);
+
+    audio.currentTime = 95;
+    player.skip(15);
+    expect(audio.currentTime).toBe(100);
+
+    audio.finish();
+    await done;
+  });
+
+  it("ignores skip when idle", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+
+    audio.currentTime = 10;
+    player.skip(15);
+    expect(audio.currentTime).toBe(10);
   });
 
   it("propagates a generator failure", async () => {

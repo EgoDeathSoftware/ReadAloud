@@ -129,6 +129,28 @@ header h1 {
   cursor: not-allowed;
 }
 
+.transport {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.transport button {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #fff;
+  background: #64748b;
+}
+
+.transport button:hover {
+  background: #475569;
+}
+
 #btn-pause {
   background: #f59e0b;
 }

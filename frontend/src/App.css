@@ -228,6 +228,43 @@ body {
   border-radius: var(--radius);
 }
 
+.audio-player__transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.audio-player__transport-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.audio-player__transport-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.audio-player__transport-btn--primary {
+  min-width: 2.75rem;
+  font-size: 1rem;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.audio-player__transport-btn--primary:hover {
+  background: var(--primary);
+  opacity: 0.85;
+}
+
 .audio-player__speed {
   display: flex;
   align-items: center;

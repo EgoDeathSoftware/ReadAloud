@@ -180,6 +180,10 @@ browser.runtime.onMessage.addListener((message) => {
       stopAll();
       return Promise.resolve();
 
+    case "skip":
+      player.skip(message.seconds);
+      return Promise.resolve();
+
     case "getVoices":
       return loadSettings()
         .then((settings) => pickAdapter(settings).listVoices(settings))
