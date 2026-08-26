@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -49,6 +50,49 @@ async def test_generate_speech_raises_after_max_retries(client):
         with pytest.raises(RuntimeError, match="TTS generation failed"):
             await client.generate_speech("Hello")
     assert mock_post.call_count == 3
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_generate_speech_does_not_retry_client_error(client):
+    error_body = json.dumps({"error": {"message": "Invalid voice: bogus"}}).encode()
+    error_response = httpx.Response(
+        400, content=error_body, request=httpx.Request("POST", "http://test")
+    )
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.HTTPStatusError(
+            "Bad request", request=error_response.request, response=error_response
+        )
+        with pytest.raises(RuntimeError, match="Invalid voice: bogus"):
+            await client.generate_speech("Hello", voice="bogus")
+    assert mock_post.call_count == 1
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_generate_speech_honors_retry_after_header(client):
+    error_response = httpx.Response(
+        429,
+        headers={"Retry-After": "7"},
+        request=httpx.Request("POST", "http://test"),
+    )
+    success_response = httpx.Response(
+        200, content=b"audio", request=httpx.Request("POST", "http://test")
+    )
+    with (
+        patch.object(client._client, "post", new_callable=AsyncMock) as mock_post,
+        patch("readaloud.services.tts_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+    ):
+        mock_post.side_effect = [
+            httpx.HTTPStatusError(
+                "Rate limited", request=error_response.request, response=error_response
+            ),
+            success_response,
+        ]
+        result = await client.generate_speech("Hello")
+    assert result == b"audio"
+    assert mock_post.call_count == 2
+    mock_sleep.assert_awaited_once_with(7.0)
     await client.close()
 
 

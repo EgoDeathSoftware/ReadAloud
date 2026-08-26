@@ -97,6 +97,61 @@ There is no `.github/` directory, and `frontend/package.json` has no test runner
 extension has full vitest coverage. A workflow running `ruff check`, `pytest`, `tsc --noEmit`, and
 the extension's `npm test` catches the class of drift that produced the double-speed bug.
 
+## OpenAI API compatibility (current priority)
+
+`docs/openai-tts-spec.md` documents the full `POST /v1/audio/speech` request/response shape.
+`TtsClient.generate_speech` (`backend/src/readaloud/services/tts_client.py`) and the extension's
+`lib/adapters/openai.js` both use only a subset of it, and their retry/error handling was written
+against Kokoro (free, local, never rate-limits) — some of it will misbehave the first time it's
+pointed at a real billed provider. Closing these gaps means both clients can point at OpenAI
+itself, Groq, or any other spec-compliant server — not just Kokoro — via config alone.
+
+Auth today (`config.py:auth_headers`, `openai.js:headers`) is basically sound: `Authorization:
+Bearer <key>` sent only when a key is configured, never echoed back by `/api/settings`. The gaps
+are elsewhere.
+
+Ranked by how much each will actually bite in practice:
+
+### Fixed on 2026-08-26
+
+- **Retries didn't check status code** — `tts_client.py` and `openai.js` now only retry 429/5xx.
+  A 400 (bad model/voice) fails immediately with the server's real error message instead of
+  burning two more attempts first.
+- **No `Retry-After` handling on 429** — both clients now read the header and sleep exactly that
+  long instead of blind `2**attempt` backoff, falling back to exponential backoff only when the
+  header is absent or unparseable.
+- **Backend swallowed the real error message** — `tts_client.py` now parses the response body
+  (`{"error": {"message": ...}}`) into `JobState.error` instead of a generic httpx exception
+  string, matching what `openai.js`'s `describeError` already did.
+
+| Gap | Notes |
+|---|---|
+| `response_format` hardcoded to `mp3` | Spec also allows `opus`, `aac`, `flac`, `wav`, `pcm`. `audio_stitcher.py`/`mp3_frames.py` assume MP3 today, so accepting another format means either transcoding to MP3 server-side or teaching the stitcher/player about the chosen format. |
+| No `instructions` field | Freeform steering text (accent, tone, whispering). OpenAI's `gpt-4o-mini-tts` supports it; passthrough is a one-line addition to `TtsGenerateRequest`/`generate_speech`, ignored harmlessly by servers that don't support it. |
+| No `stream_format: "sse"` support | `TtsClient` always reads `response.content` as one blob. Supporting `speech.audio.delta`/`speech.audio.done` SSE events would let the ReadAloud FastAPI backend forward audio to the frontend as it's generated — pairs with "Stream playback in the web app" and "SSE instead of polling" above. It also unlocks usage/cost reporting: the terminal `speech.audio.done` event carries token usage, irrelevant for free local Kokoro but real money against OpenAI/Groq. |
+| No `OpenAI-Organization` / `OpenAI-Project` headers | Needed for keys tied to a multi-org OpenAI account, otherwise requests may silently hit the wrong default org/billing. No equivalent concept in Kokoro. |
+| One global API key, no per-target credential storage | `READALOUD_TTS_API_KEY` / `directApiKey` is a single flat value. Switching between a keyless Kokoro config and a keyed OpenAI/Groq config means re-entering settings each time — relevant since multiple backends are planned. |
+| No model/voice validation against the known enum | A typo'd model/voice against real OpenAI only surfaces as an opaque failed job after generation starts, not as a settings-page warning. `voices.py`'s hardcoded `FALLBACK_VOICES` / `openai.js`'s `FALLBACK_VOICES` could double as a validation list. |
+| No input-length guard tied to the active target | `MAX_CHUNK_CHARS` defaults to 4000 (under OpenAI's 4096 cap), but nothing stops configuring it higher for Kokoro and then silently 400ing every chunk if the same config later points at OpenAI. |
+| `voice` as `{id: string}` object not supported | Only bare string voice IDs are sent today. Low priority — self-hosted servers only use string IDs; matters only if OpenAI's custom-voice-cloning feature is ever targeted. |
+
+## Kokoro-specific extensions (future, deferred)
+
+Everything below only works against Kokoro-FastAPI specifically — not OpenAI, Groq, or other
+OpenAI-compatible servers per `docs/PROVIDERS.md` — so it's deferred until the OpenAI-compatibility
+gaps above are closed and there's a capability-detection or Kokoro-only code path to gate these on.
+
+| Feature | What it needs |
+|---|---|
+| SSML `<break time="Xms"/>` pause tags | Works in both streaming and non-streaming `/v1/audio/speech`. Cheap: insert breaks at paragraph boundaries instead of relying on natural sentence pauses. |
+| Kokoro's native audio streaming/chunking | Server-side chunking via `TARGET_MIN_TOKENS`/`TARGET_MAX_TOKENS`/`ABSOLUTE_MAX_TOKENS`. Could replace or complement ReadAloud's own `text_chunker.py` + job-store chunking — needs a design decision on which layer owns chunking. |
+| Multi-language support | Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin, plus US/GB English. Nothing in ReadAloud surfaces a language selector today; relevant if URL extraction pulls non-English content. |
+| Phoneme endpoints (text→phonemes, phonemes→audio) | Enables a pronunciation-dictionary feature (see "Text preprocessing" below) with exact control instead of guessing. |
+| Voice tagging sidecar (`allow_voice_tags`) | Each chunk's response carries which voice spoke it, when multiple voices are used in one generation. |
+| Inline multi-speaker generation | Beyond simple voice blending (`af_bella+af_sky`), switch speakers within one request — e.g. narrator voice vs. quoted-text voice. Pairs with voice tagging above. |
+| Voice blending (`af_bella+af_sky` weighted mixes) | Already listed under Features below; noted here too since it's Kokoro-only. |
+| Sentence highlighting via `/dev/captioned_speech` | Already listed under Features below; noted here too since it's Kokoro-only. |
+
 ## Features
 
 | Feature | Why it fits | Effort |

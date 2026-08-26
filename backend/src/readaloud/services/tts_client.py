@@ -4,6 +4,29 @@ import httpx
 
 from readaloud.config import auth_headers, settings
 
+MAX_ATTEMPTS = 3
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _error_message(response: httpx.Response) -> str:
+    try:
+        detail = response.json().get("error", {}).get("message")
+    except ValueError:
+        detail = None
+    if detail:
+        return f"TTS server error {response.status_code}: {detail}"
+    return f"TTS server error {response.status_code}"
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after is not None:
+        try:
+            return float(retry_after)
+        except ValueError:
+            pass
+    return 2**attempt
+
 
 class TtsClient:
     """Async client for OpenAI-compatible TTS servers."""
@@ -38,18 +61,25 @@ class TtsClient:
             "response_format": "mp3",
         }
 
-        last_error: Exception | None = None
-        for attempt in range(3):
+        last_error: Exception | str | None = None
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 response = await self._client.post(url, json=payload, headers=auth_headers())
                 response.raise_for_status()
                 return response.content
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                last_error = _error_message(exc.response)
+                if status not in RETRYABLE_STATUS_CODES:
+                    raise RuntimeError(last_error) from exc
+                if attempt < MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(_retry_delay(exc.response, attempt))
             except (httpx.HTTPError, httpx.StreamError) as exc:
                 last_error = exc
-                if attempt < 2:
+                if attempt < MAX_ATTEMPTS - 1:
                     await asyncio.sleep(2**attempt)
 
-        raise RuntimeError(f"TTS generation failed after 3 attempts: {last_error}")
+        raise RuntimeError(f"TTS generation failed after {MAX_ATTEMPTS} attempts: {last_error}")
 
     async def close(self) -> None:
         await self._client.aclose()

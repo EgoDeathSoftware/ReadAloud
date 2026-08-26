@@ -21,6 +21,16 @@ function blobResponse(bytes) {
   return { ok: true, status: 200, blob: async () => new Blob([bytes], { type: "audio/mpeg" }) };
 }
 
+function errorResponse(body, status, headers = {}) {
+  return {
+    ok: false,
+    status,
+    headers: { get: (name) => headers[name] ?? null },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
+}
+
 async function collect(generator) {
   const out = [];
   for await (const item of generator) out.push(item);
@@ -141,6 +151,43 @@ describe("synthesize", () => {
       jsonResponse({ error: { message: "Invalid voice: bogus" } }, 400),
     );
     await expect(collect(synth({ voice: "bogus" }))).rejects.toThrow(/Invalid voice: bogus/);
+  });
+
+  it("does not retry a 400 (permanent failure)", async () => {
+    let attempts = 0;
+    globalThis.fetch = vi.fn(async () => {
+      attempts += 1;
+      return errorResponse({ error: { message: "Invalid voice: bogus" } }, 400);
+    });
+    await expect(collect(synth({ voice: "bogus" }))).rejects.toThrow(/Invalid voice: bogus/);
+    expect(attempts).toBe(1);
+  });
+
+  it("retries a 429 honoring the Retry-After header", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      globalThis.fetch = vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return errorResponse(
+            { error: { message: "rate limited" } },
+            429,
+            { "Retry-After": "7" },
+          );
+        }
+        return blobResponse("audio");
+      });
+      const sleepSpy = vi.spyOn(globalThis, "setTimeout");
+      const resultsPromise = collect(synth());
+      await vi.advanceTimersByTimeAsync(7000);
+      const results = await resultsPromise;
+      expect(attempts).toBe(2);
+      expect(results).toHaveLength(1);
+      expect(sleepSpy).toHaveBeenCalledWith(expect.any(Function), 7000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts without retrying when the signal fires", async () => {

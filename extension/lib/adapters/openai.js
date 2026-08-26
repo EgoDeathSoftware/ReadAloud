@@ -140,22 +140,42 @@ async function requestChunk(input, voice, settings, signal) {
 
   let lastError = "unknown error";
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let response;
     try {
-      const response = await fetch(url, {
+      response = await fetch(url, {
         method: "POST",
         headers: headers(settings, { "Content-Type": "application/json" }),
         body,
         signal,
       });
-      if (response.ok) return await response.blob();
-      lastError = await describeError(response);
     } catch (err) {
       if (err.name === "AbortError") throw err;
       lastError = err.message;
+      if (attempt < MAX_ATTEMPTS - 1) await sleep(2 ** attempt * 1000, signal);
+      continue;
+    }
+
+    if (response.ok) return await response.blob();
+
+    lastError = await describeError(response);
+    if (!RETRYABLE_STATUSES.has(response.status)) {
+      throw new Error(lastError);
     }
     if (attempt < MAX_ATTEMPTS - 1) {
-      await sleep(2 ** attempt * 1000, signal);
+      await sleep(retryDelayMs(response, attempt), signal);
     }
   }
   throw new Error(`TTS request failed after ${MAX_ATTEMPTS} attempts: ${lastError}`);
+}
+
+/** 4xx other than 429 is a permanent failure (bad model/voice/request) — retrying wastes time. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+function retryDelayMs(response, attempt) {
+  const retryAfter = response.headers?.get?.("Retry-After");
+  if (retryAfter != null) {
+    const seconds = Number(retryAfter);
+    if (!Number.isNaN(seconds)) return seconds * 1000;
+  }
+  return 2 ** attempt * 1000;
 }
