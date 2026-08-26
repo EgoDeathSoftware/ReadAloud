@@ -23,31 +23,48 @@ Line references are to the state of the tree at the time of review and may drift
 Redirects are followed manually (`follow_redirects=False`, max 5 hops) so each hop revalidates —
 otherwise a public URL could bounce the request to `127.0.0.1`.
 
-Two things the guard does *not* cover, both still open:
+One thing the guard does *not* cover, still open:
 
 - **DNS rebinding (TOCTOU).** The guard resolves the host to check it, then httpx resolves again to
   connect. A hostname with a very short TTL can return a public address to the first lookup and a
   private one to the second. Closing this means pinning the validated IP through a custom transport.
-- **`allow_origins=["*"]`** (`backend/src/readaloud/main.py:13`) is unchanged, so any page the user
-  visits can still drive the API — it just can no longer reach the internal network through it.
 
-### Concatenated MP3s aren't seekable
+### Also fixed on 2026-08-25
 
-`stitch_mp3` (`backend/src/readaloud/services/audio_stitcher.py:12`) is a raw `b"".join`. Browsers
-read the first frame header, so `duration` on a stitched multi-chunk file is wrong or `Infinity` —
-the seek bar and the `audio.duration` clamp in `AudioPlayer.skip()` break on exactly the long
-articles that need them.
+- **`allow_origins=["*"]`** — the API now allows only the local dev and production origins, plus
+  browser-extension origins by regex (MV2 host permissions already bypass CORS, so this grants an
+  installed extension nothing new). Override with `READALOUD_ALLOWED_ORIGINS`, a comma-separated
+  list that replaces the defaults. A wildcard is never returned. `main.py` gained a `create_app()`
+  factory so this is testable under different settings.
+- **Unbounded in-memory job store** — `JobState` no longer holds any audio. New
+  `services/job_store.py` writes chunks to a temp dir keyed by job id; once every chunk lands they
+  are streamed into one stitched file and the chunk files are deleted, so a finished job costs one
+  copy on disk instead of two in memory. The TTL is now enforced by a background sweeper
+  (`sweep_jobs_forever`, every 5 min) rather than only when a generate request arrives, and all job
+  audio is purged on shutdown.
 
-Either write a correct Xing/VBR header, or return per-chunk durations from the API and let the
-client build its own timeline.
+  Dropping the chunk files would have broken the extension, which pulls chunk endpoints lazily and
+  is routinely still behind when a job completes. `finalize_from_chunks` therefore records each
+  chunk's `(offset, length)` in `chunks.json`, and `/api/tts/audio/{job_id}/{index}` serves that
+  byte range out of the stitched file. Those offsets are also most of the input the seekability fix
+  below needs.
 
-### Unbounded in-memory job store
+### Fixed on 2026-08-26
 
-`jobs` (`backend/src/readaloud/routes/tts.py:34`) holds every chunk's audio *and* the stitched copy
-(`chunk_audio` + `audio_data`, so 2× memory), and is TTL-swept only when a new generate request
-arrives. A few 100k-char articles hold hundreds of MB indefinitely.
+- **Concatenated MP3s weren't seekable** — `stitch_mp3` was a raw `b"".join`. If a chunk's encoder
+  wrote a Xing/Info VBR header as its first frame (a silent placeholder describing that chunk's own
+  frame/byte count for seeking), naive concatenation left one such header per chunk buried
+  mid-stream; browsers read only the first and reported chunk one's duration for the whole file.
 
-Spill audio to a temp dir keyed by job id, and drop `chunk_audio` once the stitch completes.
+  New `services/mp3_frames.py` parses Layer III frame headers, strips any embedded Xing/Info header
+  from each chunk, and `audio_stitcher` rebuilds a single correct one at the front of the stitched
+  file with the true total frame/byte counts. `stitch_mp3_to_file` now returns the real per-source
+  byte ranges in the output (not the sources' original sizes, since a stripped header shifts them),
+  and `job_store.finalize_from_chunks` records those in `chunks.json` instead of computing offsets
+  from the raw chunk files — otherwise per-chunk reads would have drifted out of alignment after the
+  header rewrite. Falls back to plain concatenation for anything that doesn't parse as MP3.
+
+This was the last remaining bug from the original review.
 
 ## Improvements
 

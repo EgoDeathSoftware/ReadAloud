@@ -34,10 +34,10 @@ pnpm preview                     # Preview production build
 
 ### Backend (`backend/src/readaloud/`)
 
-- `main.py` — FastAPI app setup, CORS, route registration, static file serving
+- `main.py` — `create_app()` factory: CORS, route registration, static file serving, job-sweeper lifespan
 - `config.py` — Pydantic settings from env vars (`READALOUD_*` prefix)
 - `routes/` — HTTP handlers: `tts.py`, `extract.py`, `voices.py`, `health.py`, `settings.py`
-- `services/` — Business logic: `tts_client.py`, `text_extractor.py`, `text_chunker.py`, `audio_stitcher.py`
+- `services/` — Business logic: `tts_client.py`, `text_extractor.py`, `text_chunker.py`, `audio_stitcher.py`, `job_store.py`, `url_guard.py`
 - `models/schemas.py` — Pydantic request/response models
 
 ### Frontend (`frontend/src/`)
@@ -92,5 +92,6 @@ Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:888
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` |
 | `READALOUD_TTS_API_KEY` | _(blank)_ |
 | `READALOUD_MAX_CHUNK_CHARS` | `4000` |
+| `READALOUD_ALLOWED_ORIGINS` | _(blank — localhost dev + prod origins)_ |
 
 In production, the FastAPI backend serves the frontend's `dist/` directory as static files.
