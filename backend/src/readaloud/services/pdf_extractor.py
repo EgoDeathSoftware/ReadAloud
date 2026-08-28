@@ -24,14 +24,16 @@ def extract_from_pdf_bytes(data: bytes) -> ExtractedContent:
     try:
         reader = PdfReader(io.BytesIO(data))
         text = "\n".join(page.extract_text() for page in reader.pages).strip()
+        title = reader.metadata.title if reader.metadata else None
     except PyPdfError as exc:
+        raise ValueError(f"Could not parse PDF: {exc}") from exc
+    except Exception as exc:
         raise ValueError(f"Could not parse PDF: {exc}") from exc
 
     if not text:
         raise ValueError("No text could be extracted from this PDF")
 
     text = text[:MAX_CHARS]
-    title = reader.metadata.title if reader.metadata else None
 
     return ExtractedContent(
         title=title,

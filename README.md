@@ -122,9 +122,11 @@ extraction only exists on the ReadAloud FastAPI backend — an OpenAI-compatible
 endpoint has no concept of PDF parsing. Only the speech-synthesis step after extraction can go
 through direct/OpenAI.
 
-Reading a PDF from a local `file://` URL additionally requires enabling **"Allow access to file
-URLs"** for the extension on `about:addons` — Firefox does not grant this by default, and it
-cannot be requested via the manifest.
+Reading a PDF from a local `file://` URL depends on Firefox's local-file-access permissions for
+extensions, which vary by Firefox version and are still evolving upstream (Mozilla is actively
+changing how this works). If `file://` PDFs fail to load, check your Firefox version's extension
+permission settings for file access; this has not been verified against a specific Firefox release
+as part of this feature.
 
 ### Extension development
 

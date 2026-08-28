@@ -115,16 +115,48 @@ async function handleReadPage(tab, voice, speed) {
   }
 }
 
+// fetch() is unreliable for file:// URLs in Firefox extension background pages
+// (a long-standing restriction of Firefox's security model, not something to
+// work around with fetch options). XMLHttpRequest with responseType "blob" is
+// the historically-reliable path for reading file:// content, so branch on
+// scheme. file:// responses typically report xhr.status === 0 — treat that as
+// success too.
+function fetchAsBlob(url, signal) {
+  if (url.startsWith("file:")) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException("Aborted", "AbortError"));
+        return;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", url);
+      xhr.responseType = "blob";
+      xhr.onload = () => {
+        if (xhr.status === 0 || xhr.status === 200) resolve(xhr.response);
+        else reject(new Error(`Could not fetch PDF: ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error("Could not fetch PDF: network error"));
+      signal?.addEventListener("abort", () => {
+        xhr.abort();
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+      xhr.send();
+    });
+  }
+  return fetch(url, { signal }).then((response) => {
+    if (!response.ok) throw new Error(`Could not fetch PDF: ${response.status}`);
+    return response.blob();
+  });
+}
+
 async function handleReadPdf(tab, voice, speed) {
   setPhase("extracting");
+  abortController = new AbortController();
+  const { signal } = abortController;
 
   try {
     const sourceUrl = resolvePdfSourceUrl(tab.url);
-    const pdfResponse = await fetch(sourceUrl);
-    if (!pdfResponse.ok) {
-      throw new Error(`Could not fetch PDF: ${pdfResponse.status}`);
-    }
-    const pdfBytes = await pdfResponse.blob();
+    const pdfBytes = await fetchAsBlob(sourceUrl, signal);
 
     const settings = await loadSettings();
     const form = new FormData();
@@ -133,6 +165,7 @@ async function handleReadPdf(tab, voice, speed) {
     const extractResponse = await fetch(`${settings.backendUrl}/api/extract/pdf`, {
       method: "POST",
       body: form,
+      signal,
     });
     if (!extractResponse.ok) {
       const body = await extractResponse.text().catch(() => "");
@@ -142,7 +175,10 @@ async function handleReadPdf(tab, voice, speed) {
 
     await handleReadRequest(text, voice, speed);
   } catch (err) {
+    if (err.name === "AbortError") return;
     setError(`Could not read PDF: ${err.message}`);
+  } finally {
+    abortController = null;
   }
 }
 

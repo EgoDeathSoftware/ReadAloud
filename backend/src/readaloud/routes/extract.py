@@ -1,4 +1,5 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from readaloud.models.schemas import ExtractRequest, ExtractResponse
 from readaloud.services.pdf_extractor import MAX_PDF_BYTES, extract_from_pdf_bytes
@@ -28,7 +29,7 @@ async def extract_pdf(file: UploadFile = File(...)) -> ExtractResponse:
     if len(data) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413, detail="PDF exceeds the 25MB upload limit")
     try:
-        result = extract_from_pdf_bytes(data)
+        result = await run_in_threadpool(extract_from_pdf_bytes, data)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ExtractResponse(

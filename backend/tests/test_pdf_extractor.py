@@ -1,8 +1,21 @@
+import io
+
 import pytest
+from pypdf import PdfWriter
 
 from readaloud.services.pdf_extractor import extract_from_pdf_bytes
 from readaloud.services.text_extractor import MAX_CHARS
 from tests.pdf_test_helpers import make_blank_pdf_bytes, make_pdf_bytes
+
+
+def make_encrypted_pdf_bytes(password: str = "secret") -> bytes:
+    """A one-page PDF encrypted with a user password — unreadable without it."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.encrypt(user_password=password)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
 
 
 def test_extracts_text_from_a_valid_pdf():
@@ -25,3 +38,8 @@ def test_text_is_truncated_to_the_maximum():
     long_pdf = make_pdf_bytes("word " * 40_000)
     result = extract_from_pdf_bytes(long_pdf)
     assert len(result.text) <= MAX_CHARS
+
+
+def test_encrypted_pdf_becomes_a_value_error():
+    with pytest.raises(ValueError, match="Could not parse PDF"):
+        extract_from_pdf_bytes(make_encrypted_pdf_bytes())
