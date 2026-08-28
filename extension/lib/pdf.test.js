@@ -48,4 +48,10 @@ describe("resolvePdfSourceUrl", () => {
   it("passes through an unparseable URL unchanged", () => {
     expect(resolvePdfSourceUrl("not a url")).toBe("not a url");
   });
+
+  it("does not double-decode a URL containing percent-encoded characters", () => {
+    const original = "https://example.com/my%20paper.pdf";
+    const viewerUrl = `resource://pdf.js/web/viewer.html?file=${encodeURIComponent(original)}`;
+    expect(resolvePdfSourceUrl(viewerUrl)).toBe(original);
+  });
 });

@@ -24,5 +24,5 @@ export function resolvePdfSourceUrl(url) {
     parsed.protocol === "resource:" && parsed.pathname.endsWith("/web/viewer.html");
   if (!isViewer) return url;
   const file = parsed.searchParams.get("file");
-  return file ? decodeURIComponent(file) : url;
+  return file || url;
 }
