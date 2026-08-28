@@ -66,6 +66,36 @@ def test_extract_endpoint_failure(client):
     assert response.status_code == 422
 
 
+def test_extract_pdf_endpoint(client):
+    from tests.pdf_test_helpers import make_pdf_bytes
+
+    pdf_bytes = make_pdf_bytes("Hello World")
+    response = client.post(
+        "/api/extract/pdf", files={"file": ("test.pdf", pdf_bytes, "application/pdf")}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["text"] == "Hello World"
+    assert data["word_count"] == 2
+
+
+def test_extract_pdf_endpoint_rejects_corrupt_pdf(client):
+    response = client.post(
+        "/api/extract/pdf", files={"file": ("bad.pdf", b"not a pdf", "application/pdf")}
+    )
+    assert response.status_code == 422
+
+
+def test_extract_pdf_endpoint_rejects_oversized_upload(client):
+    from readaloud.services.pdf_extractor import MAX_PDF_BYTES
+
+    big = b"%PDF-1.4\n" + b"0" * MAX_PDF_BYTES
+    response = client.post(
+        "/api/extract/pdf", files={"file": ("big.pdf", big, "application/pdf")}
+    )
+    assert response.status_code == 413
+
+
 def test_voices_fallback(client):
     with patch("readaloud.routes.voices.httpx.AsyncClient") as mock_cls:
         mock_client = AsyncMock()

@@ -1,6 +1,7 @@
 import { pickAdapter } from "/lib/adapters/index.js";
 import { createPlayer } from "/lib/player.js";
 import { loadSettings } from "/lib/settings.js";
+import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
 
 const state = {
   phase: "idle",
@@ -87,14 +88,20 @@ async function handleReadRequest(text, voice, speed) {
   }
 }
 
-async function handleReadPage(tabId, voice, speed) {
+async function handleReadPage(tab, voice, speed) {
   stopAll();
+
+  if (await isPdfTab(tab.url)) {
+    await handleReadPdf(tab, voice, speed);
+    return;
+  }
+
   setPhase("extracting");
 
   try {
     // Inject Readability.js first (defines the global), then run the extractor.
-    await browser.tabs.executeScript(tabId, { file: "Readability.js" });
-    const results = await browser.tabs.executeScript(tabId, { file: "content.js" });
+    await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
+    const results = await browser.tabs.executeScript(tab.id, { file: "content.js" });
     const article = results && results[0];
 
     if (!article || !article.text || article.text.trim().length === 0) {
@@ -105,6 +112,65 @@ async function handleReadPage(tabId, voice, speed) {
     await handleReadRequest(article.text, voice, speed);
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
+  }
+}
+
+function fetchAsBlob(url, signal) {
+  return fetch(url, { signal }).then((response) => {
+    if (!response.ok) throw new Error(`Could not fetch PDF: ${response.status}`);
+    return response.blob();
+  });
+}
+
+// The background page cannot fetch() or XHR a file:// URL directly — Firefox
+// blocks that at the network layer regardless of the "Allow access to file
+// URLs" extension setting. That setting instead controls whether extension
+// code may run *inside* a file:// tab, so read the bytes from within the tab
+// itself (same-origin fetch of its own location) via executeScript.
+function fetchFileTabBytes(tabId) {
+  return browser.tabs
+    .executeScript(tabId, {
+      code: "fetch(location.href).then((r) => r.arrayBuffer())",
+    })
+    .then((results) => {
+      const arrayBuffer = results && results[0];
+      if (!arrayBuffer) throw new Error("Could not read local file");
+      return new Blob([arrayBuffer], { type: "application/pdf" });
+    });
+}
+
+async function handleReadPdf(tab, voice, speed) {
+  setPhase("extracting");
+  abortController = new AbortController();
+  const { signal } = abortController;
+
+  try {
+    const sourceUrl = resolvePdfSourceUrl(tab.url);
+    const pdfBytes = sourceUrl.startsWith("file:")
+      ? await fetchFileTabBytes(tab.id)
+      : await fetchAsBlob(sourceUrl, signal);
+
+    const settings = await loadSettings();
+    const form = new FormData();
+    form.append("file", pdfBytes, "document.pdf");
+
+    const extractResponse = await fetch(`${settings.backendUrl}/api/extract/pdf`, {
+      method: "POST",
+      body: form,
+      signal,
+    });
+    if (!extractResponse.ok) {
+      const body = await extractResponse.text().catch(() => "");
+      throw new Error(`${extractResponse.status}: ${body}`);
+    }
+    const { text } = await extractResponse.json();
+
+    await handleReadRequest(text, voice, speed);
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    setError(`Could not read PDF: ${err.message}`);
+  } finally {
+    abortController = null;
   }
 }
 
@@ -125,7 +191,7 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
     handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
-    handleReadPage(tab.id, settings.defaultVoice, settings.defaultSpeed);
+    handleReadPage(tab, settings.defaultVoice, settings.defaultSpeed);
   }
 });
 
@@ -158,7 +224,7 @@ browser.runtime.onMessage.addListener((message) => {
         .query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
-          handleReadPage(tabs[0].id, message.voice, message.speed);
+          handleReadPage(tabs[0], message.voice, message.speed);
         })
         .catch((err) => setError(`Could not read page: ${err.message}`));
 
