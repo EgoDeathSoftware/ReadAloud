@@ -42,3 +42,4 @@ class SettingsResponse(BaseModel):
     tts_base_url: str
     tts_model: str
     tts_default_voice: str
+    max_chunk_chars: int

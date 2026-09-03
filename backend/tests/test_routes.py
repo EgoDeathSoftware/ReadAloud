@@ -116,7 +116,12 @@ def test_voices_fallback(client):
 def test_settings_get_returns_config(client):
     response = client.get("/api/settings")
     assert response.status_code == 200
-    assert set(response.json()) == {"tts_base_url", "tts_model", "tts_default_voice"}
+    assert set(response.json()) == {
+        "tts_base_url",
+        "tts_model",
+        "tts_default_voice",
+        "max_chunk_chars",
+    }
 
 
 def test_settings_put_is_gone(client):
