@@ -2,6 +2,7 @@ import { pickAdapter } from "/lib/adapters/index.js";
 import { createPlayer } from "/lib/player.js";
 import { loadSettings } from "/lib/settings.js";
 import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
+import { sliceFromArticle } from "/lib/read-from-here.js";
 
 const state = {
   phase: "idle",
@@ -88,6 +89,16 @@ async function handleReadRequest(text, voice, speed) {
   }
 }
 
+// Inject Readability.js first (defines the global), then run the extractor.
+// Returns the extracted article text, or null if nothing could be extracted.
+async function extractArticleText(tab) {
+  await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
+  const results = await browser.tabs.executeScript(tab.id, { file: "content.js" });
+  const article = results && results[0];
+  if (!article || !article.text || article.text.trim().length === 0) return null;
+  return article.text;
+}
+
 async function handleReadPage(tab, voice, speed) {
   stopAll();
 
@@ -99,17 +110,36 @@ async function handleReadPage(tab, voice, speed) {
   setPhase("extracting");
 
   try {
-    // Inject Readability.js first (defines the global), then run the extractor.
-    await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
-    const results = await browser.tabs.executeScript(tab.id, { file: "content.js" });
-    const article = results && results[0];
-
-    if (!article || !article.text || article.text.trim().length === 0) {
+    const text = await extractArticleText(tab);
+    if (!text) {
       setError("No article content could be extracted from this page");
       return;
     }
 
-    await handleReadRequest(article.text, voice, speed);
+    await handleReadRequest(text, voice, speed);
+  } catch (err) {
+    setError(`Extraction failed: ${err.message}`);
+  }
+}
+
+async function handleReadFromHere(tab, selectionText, voice, speed) {
+  stopAll();
+  setPhase("extracting");
+
+  try {
+    const articleText = await extractArticleText(tab);
+    if (!articleText) {
+      setError("No article content could be extracted from this page");
+      return;
+    }
+
+    const fromHere = sliceFromArticle(articleText, selectionText);
+    if (!fromHere) {
+      setError("Could not find that selection in the page text");
+      return;
+    }
+
+    await handleReadRequest(fromHere, voice, speed);
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
   }
@@ -181,6 +211,12 @@ browser.contextMenus.create({
 });
 
 browser.contextMenus.create({
+  id: "readaloud-from-here",
+  title: "ReadAloud: Read From Here",
+  contexts: ["selection"],
+});
+
+browser.contextMenus.create({
   id: "readaloud-page",
   title: "ReadAloud: Read Page",
   contexts: ["page"],
@@ -190,6 +226,8 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const settings = await loadSettings();
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
     handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
+  } else if (info.menuItemId === "readaloud-from-here" && info.selectionText && tab.id) {
+    handleReadFromHere(tab, info.selectionText, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
     handleReadPage(tab, settings.defaultVoice, settings.defaultSpeed);
   }
