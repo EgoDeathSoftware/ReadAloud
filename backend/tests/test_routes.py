@@ -253,6 +253,49 @@ async def test_long_text_streams_chunks_and_keeps_them_readable(temp_job_store):
         assert temp_job_store.read_chunk(job_id, index) == expected
 
 
+async def test_known_chunk_hash_skips_synthesis(temp_job_store):
+    import hashlib
+
+    job_id = "cache-hit-job"
+    jobs[job_id] = JobState(id=job_id, status="processing", chunks_total=2)
+    known_hash = hashlib.sha256(b"a").hexdigest()
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"synth-b")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id, ["a", "b"], "af_heart", "kokoro", 1.0, {known_hash: b"cached-a"}
+        )
+
+    assert mock_client.generate_speech.await_count == 1
+    assert mock_client.generate_speech.await_args.args[0] == "b"
+    assert temp_job_store.read_chunk(job_id, 0) == b"cached-a"
+    assert temp_job_store.read_chunk(job_id, 1) == b"synth-b"
+    assert jobs[job_id].chunks[0].source == "client_cache"
+    assert jobs[job_id].chunks[0].hash == known_hash
+    assert jobs[job_id].chunks[1].source == "synthesized"
+
+
+async def test_process_long_text_without_known_chunks_synthesizes_everything(temp_job_store):
+    """Existing callers that omit the new param keep working unchanged."""
+    job_id = "no-cache-job"
+    jobs[job_id] = JobState(id=job_id, status="processing", chunks_total=1)
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"synth-only")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(job_id, ["only"], "af_heart", "kokoro", 1.0)
+
+    assert mock_client.generate_speech.await_count == 1
+    assert jobs[job_id].chunks[0].source == "synthesized"
+
+
 async def test_chunk_endpoint_serves_a_completed_job(client, temp_job_store):
     """A client still walking the chunks of a finished job must not get a 503."""
     job_id = "done-job"

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse, Response
 
 from readaloud.config import settings
 from readaloud.models.schemas import (
+    ChunkStatus,
     TtsGenerateRequest,
     TtsGenerateResponse,
     TtsStatusResponse,
@@ -34,6 +36,7 @@ class JobState:
     chunks_total: int = 0
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    chunks: list[ChunkStatus] = field(default_factory=list)
 
 
 jobs: dict[str, JobState] = {}
@@ -74,6 +77,7 @@ async def _process_long_text(
     voice: str,
     model: str,
     speed: float,
+    known_by_hash: dict[str, bytes] | None = None,
 ) -> None:
     """Background task to generate and stitch audio for chunked text.
 
@@ -81,14 +85,28 @@ async def _process_long_text(
     chunk has landed they are stitched into the final file and the chunk files are
     removed, so a finished job costs one copy of the audio rather than two. The
     per-chunk endpoints keep working against that single copy.
+
+    A chunk whose hash is already in `known_by_hash` uses those bytes instead of
+    calling the TTS server -- the client already has this audio from a prior
+    session and uploaded it rather than asking for it to be resynthesized.
     """
     job = jobs[job_id]
     client = TtsClient()
+    known_by_hash = known_by_hash or {}
 
     try:
         for i, chunk in enumerate(chunks):
-            audio = await client.generate_speech(chunk, voice, model, speed)
+            chunk_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+            cached_audio = known_by_hash.get(chunk_hash)
+            if cached_audio is not None:
+                audio = cached_audio
+                source = "client_cache"
+            else:
+                audio = await client.generate_speech(chunk, voice, model, speed)
+                source = "synthesized"
+
             job_store.write_chunk(job_id, i, audio)
+            job.chunks.append(ChunkStatus(index=i, hash=chunk_hash, source=source))
             job.chunks_completed = i + 1
             job.progress = job.chunks_completed / job.chunks_total
 
