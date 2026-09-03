@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import hashlib
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -10,6 +12,7 @@ from fastapi.responses import FileResponse, Response
 from readaloud.config import settings
 from readaloud.models.schemas import (
     ChunkStatus,
+    KnownChunk,
     TtsGenerateRequest,
     TtsGenerateResponse,
     TtsStatusResponse,
@@ -19,6 +22,9 @@ from readaloud.services.text_chunker import chunk_text
 from readaloud.services.tts_client import TtsClient
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+MAX_KNOWN_CHUNKS = 500
 
 
 @dataclass
@@ -119,6 +125,21 @@ async def _process_long_text(
         await client.close()
 
 
+def _decode_known_chunks(known_chunks: list[KnownChunk]) -> dict[str, bytes]:
+    """Decode client-supplied cached chunk audio, dropping unreadable entries.
+
+    A malformed entry must never fail the whole request -- it just means that
+    one chunk gets resynthesized instead of reused.
+    """
+    decoded: dict[str, bytes] = {}
+    for entry in known_chunks:
+        try:
+            decoded[entry.hash] = base64.b64decode(entry.audio_b64, validate=True)
+        except ValueError:
+            logger.warning("Dropping known_chunk with unreadable audio_b64 (hash=%s)", entry.hash)
+    return decoded
+
+
 @router.post("/tts/generate")
 async def generate_tts(
     request: TtsGenerateRequest,
@@ -126,6 +147,12 @@ async def generate_tts(
 ) -> TtsGenerateResponse:
     """Generate TTS audio from text."""
     _cleanup_old_jobs()
+
+    if len(request.known_chunks) > MAX_KNOWN_CHUNKS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many known_chunks (max {MAX_KNOWN_CHUNKS})",
+        )
 
     job_id = str(uuid.uuid4())
     voice = request.voice or settings.TTS_DEFAULT_VOICE
@@ -152,13 +179,16 @@ async def generate_tts(
             audio_url=f"/api/tts/audio/{job_id}",
         )
 
+    known_by_hash = _decode_known_chunks(request.known_chunks)
     chunks = chunk_text(request.text, settings.MAX_CHUNK_CHARS)
     jobs[job_id] = JobState(
         id=job_id,
         status="processing",
         chunks_total=len(chunks),
     )
-    background_tasks.add_task(_process_long_text, job_id, chunks, voice, model, request.speed)
+    background_tasks.add_task(
+        _process_long_text, job_id, chunks, voice, model, request.speed, known_by_hash
+    )
     return TtsGenerateResponse(
         job_id=job_id,
         status="processing",
@@ -179,6 +209,7 @@ async def get_tts_status(job_id: str) -> TtsStatusResponse:
         chunks_completed=job.chunks_completed,
         chunks_total=job.chunks_total,
         error=job.error,
+        chunks=job.chunks,
     )
 
 

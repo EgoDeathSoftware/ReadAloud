@@ -296,6 +296,90 @@ async def test_process_long_text_without_known_chunks_synthesizes_everything(tem
     assert jobs[job_id].chunks[0].source == "synthesized"
 
 
+def test_tts_generate_known_chunk_skips_synthesis_end_to_end(client, temp_job_store, monkeypatch):
+    import base64
+    import hashlib
+    import time as time_module
+
+    from readaloud.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "MAX_CHUNK_CHARS", 10)
+    text = "AAAAAAAAAA\n\nBBBBBBBBBB"
+    known_hash = hashlib.sha256(b"AAAAAAAAAA").hexdigest()
+    known_audio_b64 = base64.b64encode(b"cached-audio").decode()
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"synth-audio")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        response = client.post(
+            "/api/tts/generate",
+            json={
+                "text": text,
+                "known_chunks": [{"hash": known_hash, "audio_b64": known_audio_b64}],
+            },
+        )
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+
+        deadline = time_module.monotonic() + 5
+        while jobs[job_id].status == "processing" and time_module.monotonic() < deadline:
+            time_module.sleep(0.01)
+
+    assert jobs[job_id].status == "complete"
+    assert mock_client.generate_speech.await_count == 1
+    assert temp_job_store.read_chunk(job_id, 0) == b"cached-audio"
+    assert temp_job_store.read_chunk(job_id, 1) == b"synth-audio"
+
+    status = client.get(f"/api/tts/status/{job_id}").json()
+    assert status["chunks"][0]["source"] == "client_cache"
+    assert status["chunks"][0]["hash"] == known_hash
+    assert status["chunks"][1]["source"] == "synthesized"
+
+
+def test_tts_generate_drops_malformed_known_chunk_audio(client, temp_job_store, monkeypatch):
+    import time as time_module
+
+    from readaloud.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "MAX_CHUNK_CHARS", 10)
+    text = "AAAAAAAAAA\n\nBBBBBBBBBB"
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"synth")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        response = client.post(
+            "/api/tts/generate",
+            json={
+                "text": text,
+                "known_chunks": [{"hash": "irrelevant", "audio_b64": "not-valid-base64!!"}],
+            },
+        )
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+
+        deadline = time_module.monotonic() + 5
+        while jobs[job_id].status == "processing" and time_module.monotonic() < deadline:
+            time_module.sleep(0.01)
+
+    assert jobs[job_id].status == "complete"
+    assert mock_client.generate_speech.await_count == 2
+
+
+def test_tts_generate_rejects_too_many_known_chunks(client):
+    known_chunks = [{"hash": str(i), "audio_b64": "ZmFrZQ=="} for i in range(501)]
+    response = client.post(
+        "/api/tts/generate",
+        json={"text": "Short text", "known_chunks": known_chunks},
+    )
+    assert response.status_code == 413
+
+
 async def test_chunk_endpoint_serves_a_completed_job(client, temp_job_store):
     """A client still walking the chunks of a finished job must not get a 503."""
     job_id = "done-job"
