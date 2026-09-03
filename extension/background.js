@@ -1,5 +1,9 @@
 import { pickAdapter } from "/lib/adapters/index.js";
+import { backendAdapter } from "/lib/adapters/backend.js";
+import { chunkCache } from "/lib/chunk-cache.js";
+import { chunkText } from "/lib/chunker.js";
 import { createPlayer } from "/lib/player.js";
+import { sha256Hex } from "/lib/hash.js";
 import { loadSettings } from "/lib/settings.js";
 import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
 import { sliceFromArticle } from "/lib/read-from-here.js";
@@ -46,6 +50,38 @@ function stopAll() {
   broadcastState();
 }
 
+function blobToBase64(blob) {
+  return blob.arrayBuffer().then((buffer) => {
+    let binary = "";
+    for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  });
+}
+
+/**
+ * Chunk `text` the same way the backend will, and offer back the audio for any
+ * chunk already cached this session -- lets the server skip resynthesizing it.
+ * Best-effort: any failure (unreachable backend, aborted read) just means no
+ * chunks are offered, falling back to full synthesis.
+ */
+async function buildKnownChunks(text, voice, settings, signal) {
+  try {
+    const response = await fetch(`${settings.backendUrl}/api/settings`, { signal });
+    if (!response.ok) return [];
+    const { max_chunk_chars: maxChunkChars } = await response.json();
+
+    const knownChunks = [];
+    for (const chunk of chunkText(text, maxChunkChars)) {
+      const hash = await sha256Hex(chunk);
+      const blob = chunkCache.get(voice, hash);
+      if (blob) knownChunks.push({ hash, audioB64: await blobToBase64(blob) });
+    }
+    return knownChunks;
+  } catch {
+    return [];
+  }
+}
+
 async function handleReadRequest(text, voice, speed) {
   stopAll();
 
@@ -56,16 +92,23 @@ async function handleReadRequest(text, voice, speed) {
 
   const settings = await loadSettings();
   const adapter = pickAdapter(settings);
+  const resolvedVoice = voice || settings.defaultVoice;
   abortController = new AbortController();
 
   player.setSpeed(speed || settings.defaultSpeed);
   setPhase("generating");
 
+  const knownChunks =
+    adapter === backendAdapter
+      ? await buildKnownChunks(text, resolvedVoice, settings, abortController.signal)
+      : [];
+
   const generator = adapter.synthesize({
     text,
-    voice: voice || settings.defaultVoice,
+    voice: resolvedVoice,
     settings,
     signal: abortController.signal,
+    knownChunks,
     onProgress: ({ chunksCompleted, chunksTotal, progress }) => {
       state.chunksCompleted = chunksCompleted;
       state.chunksTotal = chunksTotal;
