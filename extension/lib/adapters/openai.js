@@ -1,4 +1,6 @@
+import { chunkCache } from "/lib/chunk-cache.js";
 import { chunkText } from "/lib/chunker.js";
+import { sha256Hex } from "/lib/hash.js";
 
 /**
  * OpenAI's hard `input` cap is 4096 characters. 4000 leaves headroom and
@@ -118,7 +120,12 @@ export const openaiAdapter = {
     onProgress({ chunksCompleted: 0, chunksTotal: total, progress: 0 });
 
     for (let index = 0; index < total; index++) {
-      const audio = await requestChunk(chunks[index], voice, settings, signal);
+      const hash = await sha256Hex(chunks[index]);
+      let audio = chunkCache.get(voice, hash);
+      if (!audio) {
+        audio = await requestChunk(chunks[index], voice, settings, signal);
+        chunkCache.set(voice, hash, audio);
+      }
       onProgress({
         chunksCompleted: index + 1,
         chunksTotal: total,

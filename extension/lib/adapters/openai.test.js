@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { chunkCache } from "/lib/chunk-cache.js";
 import { openaiAdapter } from "./openai.js";
 
 const settings = {
@@ -50,6 +51,7 @@ function synth(overrides = {}) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  chunkCache.clear();
 });
 
 describe("listVoices", () => {
@@ -87,6 +89,32 @@ describe("listVoices", () => {
 });
 
 describe("synthesize", () => {
+  it("does not re-request a chunk already in the cache", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return blobResponse("audio");
+    });
+
+    await collect(synth());
+    expect(calls).toBe(1);
+
+    await collect(synth());
+    expect(calls).toBe(1);
+  });
+
+  it("caches per voice, so a different voice still requests", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return blobResponse("audio");
+    });
+
+    await collect(synth({ voice: "af_heart" }));
+    await collect(synth({ voice: "am_adam" }));
+    expect(calls).toBe(2);
+  });
+
   it("posts one request per chunk and yields a blob each", async () => {
     const calls = [];
     globalThis.fetch = vi.fn(async (url, options) => {
@@ -164,7 +192,7 @@ describe("synthesize", () => {
   });
 
   it("retries a 429 honoring the Retry-After header", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       let attempts = 0;
       globalThis.fetch = vi.fn(async () => {
@@ -180,6 +208,11 @@ describe("synthesize", () => {
       });
       const sleepSpy = vi.spyOn(globalThis, "setTimeout");
       const resultsPromise = collect(synth());
+      // synthesize() now hashes the chunk (a real, setImmediate-backed async
+      // op) before its first fetch attempt. Let that settle on the real event
+      // loop before advancing fake time, or the retry's setTimeout call never
+      // gets scheduled in time for advanceTimersByTimeAsync to see it.
+      await new Promise((resolve) => setImmediate(resolve));
       await vi.advanceTimersByTimeAsync(7000);
       const results = await resultsPromise;
       expect(attempts).toBe(2);
