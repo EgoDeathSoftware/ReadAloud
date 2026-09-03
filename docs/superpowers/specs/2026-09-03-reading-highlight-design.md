@@ -94,6 +94,13 @@ tracks the underlying audio position, not wall-clock speed.
   `status == "complete"` (mirrors the existing `chunks` field). No new
   endpoint — the frontend already polls status and already receives the
   complete response.
+- `TtsGenerateResponse` also gains `cues: list[Cue] = []`. The short-text
+  synchronous path in `generate_tts` returns `status: "complete"`
+  directly, without the frontend ever calling `/tts/status` — today's
+  `useTts.generate` fetches audio straight from that response. Cues must
+  therefore ride along on `TtsGenerateResponse` too whenever it reports
+  `status: "complete"`; the async job path returns `status: "processing"`
+  with `cues: []`, filled in later via `/tts/status`.
 
 ## Frontend
 
@@ -175,10 +182,9 @@ Backend:
   chunk, the oversized-sentence-split-across-chunks edge case, empty
   chunk text.
 
-Frontend:
-- Binary-search cue lookup: before first cue, between cues, after last
-  cue, exact boundary times.
-- `App` swap behavior: `TextInput` shown when idle/paused, `ReadingText`
-  shown while playing, reverts on stop/end.
-- `ReadingText`: correct span gets the highlight class as
-  `activeCueIndex` changes.
+Frontend: the frontend has no test runner today (unlike the backend and
+the extension). Rather than introduce one for this feature, verify
+manually in the browser: generate audio for a multi-sentence, multi-chunk
+text, confirm the highlight tracks playback, jumps correctly on manual
+seeking and skip-button use, and that the view reverts to the editable
+textarea on pause/stop/end.
