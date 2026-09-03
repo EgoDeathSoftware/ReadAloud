@@ -1,3 +1,5 @@
+import { chunkCache } from "/lib/chunk-cache.js";
+
 const POLL_INTERVAL_MS = 1000;
 
 function sleep(ms, signal) {
@@ -52,9 +54,15 @@ export const backendAdapter = {
     }
   },
 
-  async *synthesize({ text, voice, settings, signal, onProgress }) {
+  async *synthesize({ text, voice, settings, signal, onProgress, knownChunks = [] }) {
     const body = { text: text.trim() };
     if (voice) body.voice = voice;
+    if (knownChunks.length > 0) {
+      body.known_chunks = knownChunks.map(({ hash, audioB64 }) => ({
+        hash,
+        audio_b64: audioB64,
+      }));
+    }
 
     const job = await backendJson(settings, "/api/tts/generate", {
       method: "POST",
@@ -87,11 +95,16 @@ export const backendAdapter = {
       }
 
       while (nextChunk < status.chunks_completed) {
-        yield {
-          audio: await fetchAudio(settings, `/api/tts/audio/${job.job_id}/${nextChunk}`, signal),
-          index: nextChunk,
-          total: status.chunks_total,
-        };
+        const info = status.chunks?.find((c) => c.index === nextChunk);
+        const cached = info ? chunkCache.get(voice, info.hash) : null;
+        let audio;
+        if (info?.source === "client_cache" && cached) {
+          audio = cached;
+        } else {
+          audio = await fetchAudio(settings, `/api/tts/audio/${job.job_id}/${nextChunk}`, signal);
+          if (info) chunkCache.set(voice, info.hash, audio);
+        }
+        yield { audio, index: nextChunk, total: status.chunks_total };
         nextChunk += 1;
       }
 
