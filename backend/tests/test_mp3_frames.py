@@ -1,5 +1,6 @@
 from readaloud.services.mp3_frames import (
     build_xing_header_frame,
+    frame_duration_seconds,
     is_xing_or_info_header,
     parse_frame_header,
     real_audio_frames,
@@ -106,3 +107,17 @@ def test_build_xing_header_frame_declares_total_frame_and_byte_counts():
     num_bytes = int.from_bytes(xing_frame[tag_offset + 12 : tag_offset + 16], "big")
     assert num_frames == len(frame_sizes) + 1  # header frame counts itself
     assert num_bytes == template.size + sum(frame_sizes)
+
+
+def test_frame_duration_seconds_sums_sample_counts():
+    audio1 = build_frame(bitrate_index=1, samplerate_index=0, mode=0)  # 44100Hz, 1152 samples/frame
+    audio2 = build_frame(bitrate_index=1, samplerate_index=0, mode=0)
+    frames = real_audio_frames(audio1 + audio2)
+
+    duration = frame_duration_seconds(frames)
+
+    assert duration == (1152 / 44100) * 2
+
+
+def test_frame_duration_seconds_empty_list_is_zero():
+    assert frame_duration_seconds([]) == 0.0
