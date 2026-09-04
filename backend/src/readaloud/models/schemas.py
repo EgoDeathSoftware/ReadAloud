@@ -1,4 +1,11 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class KnownChunk(BaseModel):
+    hash: str
+    audio_b64: str
 
 
 class TtsGenerateRequest(BaseModel):
@@ -6,12 +13,19 @@ class TtsGenerateRequest(BaseModel):
     voice: str | None = None
     model: str | None = None
     speed: float = 1.0
+    known_chunks: list[KnownChunk] = Field(default_factory=list)
 
 
 class TtsGenerateResponse(BaseModel):
     job_id: str
     status: str
     audio_url: str | None = None
+
+
+class ChunkStatus(BaseModel):
+    index: int
+    hash: str
+    source: Literal["synthesized", "client_cache"]
 
 
 class TtsStatusResponse(BaseModel):
@@ -21,6 +35,7 @@ class TtsStatusResponse(BaseModel):
     chunks_completed: int = 0
     chunks_total: int = 0
     error: str | None = None
+    chunks: list[ChunkStatus] = Field(default_factory=list)
 
 
 class ExtractRequest(BaseModel):
@@ -42,3 +57,4 @@ class SettingsResponse(BaseModel):
     tts_base_url: str
     tts_model: str
     tts_default_voice: str
+    max_chunk_chars: int

@@ -19,12 +19,7 @@ interface UseTtsResult {
   chunksTotal: number;
   audioUrl: string | null;
   error: string | null;
-  generate: (
-    text: string,
-    voice?: string,
-    model?: string,
-    speed?: number,
-  ) => void;
+  generate: (text: string, voice?: string, model?: string) => void;
   reset: () => void;
 }
 
@@ -125,19 +120,14 @@ export function useTts(): UseTtsResult {
   );
 
   const generate = useCallback(
-    (
-      text: string,
-      voice?: string,
-      model?: string,
-      speed?: number,
-    ) => {
+    (text: string, voice?: string, model?: string) => {
       clearTimer();
       setState("generating");
       setProgress(0);
       setError(null);
       setAudioUrl(null);
 
-      generateTts({ text, voice, model, speed })
+      generateTts({ text, voice, model })
         .then((resp) => {
           if (resp.status === "complete") {
             setAudioBlobUrl(getTtsAudioUrl(resp.job_id), () =>

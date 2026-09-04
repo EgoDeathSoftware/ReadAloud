@@ -4,7 +4,11 @@ from dataclasses import dataclass
 import httpx
 import trafilatura
 
+from readaloud.services.url_guard import validate_public_url
+
 MAX_CHARS = 100_000
+MAX_REDIRECTS = 5
+FETCH_TIMEOUT = 15
 
 _BROWSER_HEADERS = {
     "User-Agent": (
@@ -24,18 +28,34 @@ class ExtractedContent:
     word_count: int
 
 
-def _fetch_with_httpx(url: str) -> str | None:
-    """Fetch a URL with browser-like headers as fallback when trafilatura fails."""
-    try:
-        with httpx.Client(follow_redirects=True, timeout=15) as client:
-            response = client.get(url, headers=_BROWSER_HEADERS)
-            response.raise_for_status()
+async def _fetch_html(url: str) -> str:
+    """Fetch a URL, validating the target before each hop.
+
+    Redirects are followed manually rather than by httpx so that a public URL cannot
+    bounce the request to a private address. Uses AsyncClient so a slow page does not
+    block the event loop and stall in-flight TTS jobs.
+    """
+    current = url
+    async with httpx.AsyncClient(follow_redirects=False, timeout=FETCH_TIMEOUT) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            validate_public_url(current)
+            try:
+                response = await client.get(current, headers=_BROWSER_HEADERS)
+            except httpx.HTTPError as exc:
+                raise ValueError(f"Could not fetch URL: {url}") from exc
+
+            if response.is_redirect and response.has_redirect_location:
+                current = str(response.next_request.url)
+                continue
+
+            if response.status_code >= 400:
+                raise ValueError(f"Could not fetch URL: {url}")
             return response.text
-    except httpx.HTTPError:
-        return None
+
+    raise ValueError(f"Too many redirects for URL: {url}")
 
 
-def extract_from_url(url: str) -> ExtractedContent:
+async def extract_from_url(url: str) -> ExtractedContent:
     """Extract main text content from a URL using trafilatura.
 
     Args:
@@ -45,13 +65,10 @@ def extract_from_url(url: str) -> ExtractedContent:
         ExtractedContent with title, text, and word count.
 
     Raises:
-        ValueError: If the URL cannot be fetched or no content is found.
+        ValueError: If the URL is not fetchable, points at a private address, or
+            yields no extractable content.
     """
-    downloaded = trafilatura.fetch_url(url)
-    if downloaded is None:
-        downloaded = _fetch_with_httpx(url)
-    if downloaded is None:
-        raise ValueError(f"Could not fetch URL: {url}")
+    downloaded = await _fetch_html(url)
 
     text = trafilatura.extract(downloaded)
     if not text:

@@ -42,7 +42,9 @@ function formSettings() {
 function syncFieldVisibility() {
   const direct = selectedTarget() === TARGET_DIRECT;
   directFields.classList.toggle("hidden", !direct);
-  backendFields.classList.toggle("hidden", direct);
+  // Backend URL stays visible even on "direct" — PDF extraction always goes
+  // through the ReadAloud backend regardless of the TTS target.
+  backendFields.classList.toggle("hidden", false);
 }
 
 async function refreshVoices(selectedVoice) {

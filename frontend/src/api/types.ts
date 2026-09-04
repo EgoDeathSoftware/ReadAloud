@@ -2,7 +2,6 @@ export interface TtsGenerateRequest {
   text: string;
   voice?: string | undefined;
   model?: string | undefined;
-  speed?: number | undefined;
 }
 
 export interface TtsGenerateResponse {

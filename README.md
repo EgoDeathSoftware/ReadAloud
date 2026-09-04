@@ -108,6 +108,26 @@ browser. Point it at any OpenAI-compatible server:
 Providers with their own request schema (ElevenLabs, Google, Polly) are not supported — see
 [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
+### Limitations
+
+**Read Selection doesn't work inside PDFs**, on either TTS target. Firefox's built-in PDF viewer
+(`pdf.js`) is a privileged internal page (`resource://pdf.js/...`) that WebExtension content
+scripts cannot be injected into — Mozilla blocked this deliberately in Firefox 60 and has not
+reversed it. "Read Page" works around this by re-extracting the PDF server-side; reading a
+selected excerpt does not have a workaround.
+
+**PDF "Read Page" always requires the ReadAloud backend reachable**, even when the extension's TTS
+target is set to "direct" (calling an OpenAI-compatible server directly for synthesis). PDF text
+extraction only exists on the ReadAloud FastAPI backend — an OpenAI-compatible `/v1/audio/speech`
+endpoint has no concept of PDF parsing. Only the speech-synthesis step after extraction can go
+through direct/OpenAI.
+
+Reading a PDF from a local `file://` URL depends on Firefox's local-file-access permissions for
+extensions, which vary by Firefox version and are still evolving upstream (Mozilla is actively
+changing how this works). If `file://` PDFs fail to load, check your Firefox version's extension
+permission settings for file access; this has not been verified against a specific Firefox release
+as part of this feature.
+
 ### Extension development
 
 ```bash
