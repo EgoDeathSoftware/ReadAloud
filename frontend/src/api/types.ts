@@ -1,3 +1,9 @@
+export interface Cue {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface TtsGenerateRequest {
   text: string;
   voice?: string | undefined;
@@ -8,6 +14,7 @@ export interface TtsGenerateResponse {
   job_id: string;
   status: "complete" | "processing" | "failed";
   audio_url: string | null;
+  cues: Cue[];
 }
 
 export interface TtsStatusResponse {
@@ -17,6 +24,7 @@ export interface TtsStatusResponse {
   chunks_completed: number;
   chunks_total: number;
   error: string | null;
+  cues: Cue[];
 }
 
 export interface ExtractRequest {
