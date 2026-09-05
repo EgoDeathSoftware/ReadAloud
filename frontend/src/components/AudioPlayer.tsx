@@ -29,8 +29,11 @@ export function AudioPlayer({
       audioRef.current.play().catch(() => {
         // Autoplay may be blocked by browser policy
       });
+    } else if (audioUrl === null) {
+      setIsPlaying(false);
+      onPlayingChange?.(false);
     }
-  }, [audioUrl]);
+  }, [audioUrl, onPlayingChange]);
 
   useEffect(() => {
     if (audioRef.current) {
