@@ -1,16 +1,27 @@
 import { useEffect, useRef, useState } from "react";
+import { findActiveCueIndex } from "src/lib/cues.ts";
+import type { Cue } from "src/api/types.ts";
 
 interface AudioPlayerProps {
   audioUrl: string | null;
+  cues?: Cue[];
+  onCueChange?: (index: number | null) => void;
+  onPlayingChange?: (isPlaying: boolean) => void;
 }
 
 const SPEED_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const SKIP_SECONDS = 15;
 
-export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
+export function AudioPlayer({
+  audioUrl,
+  cues = [],
+  onCueChange,
+  onPlayingChange,
+}: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const activeCueRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (audioUrl && audioRef.current) {
@@ -26,6 +37,32 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
       audioRef.current.playbackRate = playbackRate;
     }
   }, [playbackRate]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      if (activeCueRef.current !== null) {
+        activeCueRef.current = null;
+        onCueChange?.(null);
+      }
+      return;
+    }
+
+    let rafId: number;
+    const tick = () => {
+      const audio = audioRef.current;
+      if (audio) {
+        const index = findActiveCueIndex(cues, audio.currentTime);
+        if (index !== activeCueRef.current) {
+          activeCueRef.current = index;
+          onCueChange?.(index);
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, cues, onCueChange]);
 
   if (audioUrl === null) return null;
 
@@ -58,9 +95,18 @@ export function AudioPlayer({ audioUrl }: AudioPlayerProps) {
         className="audio-player__element"
         controls
         src={audioUrl}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
+        onPlay={() => {
+          setIsPlaying(true);
+          onPlayingChange?.(true);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          onPlayingChange?.(false);
+        }}
+        onEnded={() => {
+          setIsPlaying(false);
+          onPlayingChange?.(false);
+        }}
       />
       <div className="audio-player__transport">
         <button
