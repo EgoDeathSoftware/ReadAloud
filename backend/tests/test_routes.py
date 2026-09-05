@@ -156,6 +156,25 @@ def test_tts_generate_short_text(client, temp_job_store):
     assert temp_job_store.read_final(job_id) == b"mp3data"
 
 
+def test_tts_generate_short_text_includes_cues(client, temp_job_store):
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        response = client.post(
+            "/api/tts/generate",
+            json={"text": "First sentence. Second sentence."},
+        )
+
+    data = response.json()
+    assert [cue["text"] for cue in data["cues"]] == [
+        "First sentence.",
+        "Second sentence.",
+    ]
+
+
 def test_job_state_holds_no_audio_bytes(client, temp_job_store):
     """Audio lives on disk; the in-memory job table keeps metadata only."""
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
@@ -251,6 +270,24 @@ async def test_long_text_streams_chunks_and_keeps_them_readable(temp_job_store):
     assert not list((temp_job_store.root / job_id).glob("chunk-*.mp3"))
     for index, expected in enumerate([b"one", b"two", b"three"]):
         assert temp_job_store.read_chunk(job_id, index) == expected
+
+
+async def test_long_text_job_status_includes_cues(temp_job_store):
+    job_id = "cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id, ["Chunk one.", "Chunk two."], "af_heart", "kokoro", 1.0
+        )
+
+    job = jobs[job_id]
+    assert [cue.text for cue in job.cues] == ["Chunk one.", "Chunk two."]
 
 
 async def test_known_chunk_hash_skips_synthesis(temp_job_store):

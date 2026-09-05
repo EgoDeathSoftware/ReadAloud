@@ -12,12 +12,15 @@ from fastapi.responses import FileResponse, Response
 from readaloud.config import settings
 from readaloud.models.schemas import (
     ChunkStatus,
+    Cue,
     KnownChunk,
     TtsGenerateRequest,
     TtsGenerateResponse,
     TtsStatusResponse,
 )
 from readaloud.services.job_store import job_store
+from readaloud.services.mp3_frames import frame_duration_seconds, real_audio_frames
+from readaloud.services.reading_cues import compute_cues
 from readaloud.services.text_chunker import chunk_text
 from readaloud.services.tts_client import TtsClient
 
@@ -43,6 +46,7 @@ class JobState:
     error: str | None = None
     created_at: float = field(default_factory=time.time)
     chunks: list[ChunkStatus] = field(default_factory=list)
+    cues: list[Cue] = field(default_factory=list)
 
 
 jobs: dict[str, JobState] = {}
@@ -117,12 +121,27 @@ async def _process_long_text(
             job.progress = job.chunks_completed / job.chunks_total
 
         job_store.finalize_from_chunks(job_id, len(chunks))
+        job.cues = _job_cues(job_id, chunks)
         job.status = "complete"
     except Exception as exc:
         job.status = "failed"
         job.error = str(exc)
     finally:
         await client.close()
+
+
+def _job_cues(job_id: str, chunks: list[str]) -> list[Cue]:
+    """Compute reading cues from each chunk's finalized audio.
+
+    Reads chunks back from `job_store` rather than the bytes just
+    synthesized, since a `client_cache`-sourced chunk was never held in
+    memory here to begin with.
+    """
+    durations = []
+    for index in range(len(chunks)):
+        audio = job_store.read_chunk(job_id, index) or b""
+        durations.append(frame_duration_seconds(real_audio_frames(audio)))
+    return compute_cues(chunks, durations)
 
 
 def _decode_known_chunks(known_chunks: list[KnownChunk]) -> dict[str, bytes]:
@@ -166,17 +185,20 @@ async def generate_tts(
             await client.close()
 
         job_store.write_final(job_id, audio)
+        cues = compute_cues([request.text], [frame_duration_seconds(real_audio_frames(audio))])
         jobs[job_id] = JobState(
             id=job_id,
             status="complete",
             progress=1.0,
             chunks_completed=1,
             chunks_total=1,
+            cues=cues,
         )
         return TtsGenerateResponse(
             job_id=job_id,
             status="complete",
             audio_url=f"/api/tts/audio/{job_id}",
+            cues=cues,
         )
 
     known_by_hash = _decode_known_chunks(request.known_chunks)
@@ -210,6 +232,7 @@ async def get_tts_status(job_id: str) -> TtsStatusResponse:
         chunks_total=job.chunks_total,
         error=job.error,
         chunks=job.chunks,
+        cues=job.cues,
     )
 
 
