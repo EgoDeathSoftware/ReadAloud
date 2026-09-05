@@ -121,7 +121,10 @@ async def _process_long_text(
             job.progress = job.chunks_completed / job.chunks_total
 
         job_store.finalize_from_chunks(job_id, len(chunks))
-        job.cues = _job_cues(job_id, chunks)
+        try:
+            job.cues = _job_cues(job_id, chunks)
+        except Exception:
+            logger.warning("Failed to compute reading cues for job %s", job_id, exc_info=True)
         job.status = "complete"
     except Exception as exc:
         job.status = "failed"
