@@ -4,6 +4,8 @@ Cue times live in the stitched audio's own timeline, so they are
 unaffected by playback-rate changes the frontend applies at playback time.
 """
 
+import re
+
 from readaloud.models.schemas import Cue
 from readaloud.services.text_chunker import split_sentences
 
@@ -42,15 +44,25 @@ def compute_cues(chunk_texts: list[str], chunk_durations: list[float]) -> list[C
 
 
 def _cues_for_chunk(text: str, duration: float, offset: float) -> list[Cue]:
-    sentences = [s for s in split_sentences(text) if s.strip()]
-    total_chars = sum(len(s) for s in sentences)
-    if not sentences or total_chars == 0:
+    paragraphs = [p for p in re.split(r"\n\n+", text) if p.strip()]
+    sentences_by_paragraph = [[s for s in split_sentences(p) if s.strip()] for p in paragraphs]
+    all_sentences = [s for para in sentences_by_paragraph for s in para]
+    total_chars = sum(len(s) for s in all_sentences)
+    if not all_sentences or total_chars == 0:
         return []
 
     cues: list[Cue] = []
     start = offset
-    for sentence in sentences:
-        end = start + duration * (len(sentence) / total_chars)
-        cues.append(Cue(text=sentence, start=start, end=end))
-        start = end
+    for para_index, para_sentences in enumerate(sentences_by_paragraph):
+        for sent_index, sentence in enumerate(para_sentences):
+            end = start + duration * (len(sentence) / total_chars)
+            is_last_sentence_in_para = sent_index == len(para_sentences) - 1
+            is_last_paragraph = para_index == len(sentences_by_paragraph) - 1
+            cue_text = (
+                sentence + "\n\n"
+                if is_last_sentence_in_para and not is_last_paragraph
+                else sentence
+            )
+            cues.append(Cue(text=cue_text, start=start, end=end))
+            start = end
     return cues

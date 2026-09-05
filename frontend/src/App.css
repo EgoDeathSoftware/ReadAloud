@@ -161,6 +161,10 @@ body {
   line-height: 1.6;
 }
 
+.reading-text__sentence {
+  white-space: pre-wrap;
+}
+
 .reading-text__sentence--active {
   background: var(--primary);
   color: #fff;
