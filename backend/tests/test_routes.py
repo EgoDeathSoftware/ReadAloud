@@ -290,6 +290,31 @@ async def test_long_text_job_status_includes_cues(temp_job_store):
     assert [cue.text for cue in job.cues] == ["Chunk one.", "Chunk two."]
 
 
+async def test_long_text_job_status_cues_have_nonzero_duration(temp_job_store):
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "cues-duration-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=1)
+
+    frame = build_frame(bitrate_index=1, samplerate_index=0, mode=0)  # 44100Hz
+    audio = frame + frame
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech = AsyncMock(return_value=audio)
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id, ["First sentence. Second sentence."], "af_heart", "kokoro", 1.0
+        )
+
+    job = jobs[job_id]
+    assert job.cues[0].end > 0
+    expected_total = (1152 / 44100) * 2
+    assert job.cues[-1].end == pytest.approx(expected_total)
+
+
 async def test_known_chunk_hash_skips_synthesis(temp_job_store):
     import hashlib
 
