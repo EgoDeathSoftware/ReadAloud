@@ -131,6 +131,7 @@ export function useTts(): UseTtsResult {
       setProgress(0);
       setError(null);
       setAudioUrl(null);
+      setCues([]);
 
       generateTts({ text, voice, model })
         .then((resp) => {
