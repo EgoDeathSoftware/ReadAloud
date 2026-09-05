@@ -28,6 +28,12 @@ class ChunkStatus(BaseModel):
     source: Literal["synthesized", "client_cache"]
 
 
+class Cue(BaseModel):
+    text: str
+    start: float
+    end: float
+
+
 class TtsStatusResponse(BaseModel):
     job_id: str
     status: str
