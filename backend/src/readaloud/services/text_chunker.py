@@ -1,6 +1,16 @@
 import re
 
 
+def split_sentences(text: str) -> list[str]:
+    """Split text into sentences on `.`, `!`, or `?` followed by whitespace.
+
+    Doesn't special-case abbreviations (e.g. "Mr.") -- this is the same
+    regex `_split_long_paragraph` has always used, just shared with the
+    reading-cue computation in `reading_cues.py`.
+    """
+    return re.split(r"(?<=[.!?])\s+", text)
+
+
 def chunk_text(text: str, max_chars: int) -> list[str]:
     """Split text into chunks that fit within max_chars.
 
@@ -52,7 +62,7 @@ def chunk_text(text: str, max_chars: int) -> list[str]:
 
 def _split_long_paragraph(text: str, max_chars: int) -> list[str]:
     """Split a paragraph that exceeds max_chars on sentence boundaries."""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
+    sentences = split_sentences(text)
     chunks: list[str] = []
     current = ""
 

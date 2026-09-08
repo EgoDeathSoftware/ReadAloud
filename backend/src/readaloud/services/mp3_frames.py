@@ -136,6 +136,11 @@ def real_audio_frames(data: bytes) -> list[tuple[FrameHeader, bytes]]:
     return frames
 
 
+def frame_duration_seconds(frames: list[tuple[FrameHeader, bytes]]) -> float:
+    """Total playback duration of a sequence of real audio frames, in seconds."""
+    return sum(header.samples_per_frame / header.sample_rate for header, _raw in frames)
+
+
 def build_xing_header_frame(template: FrameHeader, frame_sizes: list[int]) -> bytes:
     """Build a replacement Xing header frame describing the whole stitched file.
 

@@ -16,16 +16,23 @@ class TtsGenerateRequest(BaseModel):
     known_chunks: list[KnownChunk] = Field(default_factory=list)
 
 
-class TtsGenerateResponse(BaseModel):
-    job_id: str
-    status: str
-    audio_url: str | None = None
-
-
 class ChunkStatus(BaseModel):
     index: int
     hash: str
     source: Literal["synthesized", "client_cache"]
+
+
+class Cue(BaseModel):
+    text: str
+    start: float
+    end: float
+
+
+class TtsGenerateResponse(BaseModel):
+    job_id: str
+    status: str
+    audio_url: str | None = None
+    cues: list[Cue] = Field(default_factory=list)
 
 
 class TtsStatusResponse(BaseModel):
@@ -36,6 +43,7 @@ class TtsStatusResponse(BaseModel):
     chunks_total: int = 0
     error: str | None = None
     chunks: list[ChunkStatus] = Field(default_factory=list)
+    cues: list[Cue] = Field(default_factory=list)
 
 
 class ExtractRequest(BaseModel):

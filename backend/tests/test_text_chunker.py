@@ -1,4 +1,4 @@
-from readaloud.services.text_chunker import chunk_text
+from readaloud.services.text_chunker import chunk_text, split_sentences
 
 
 def test_short_text_returns_single_chunk():
@@ -53,3 +53,16 @@ def test_exact_boundary():
     text = "12345"
     result = chunk_text(text, 5)
     assert result == ["12345"]
+
+
+def test_split_sentences_splits_on_terminal_punctuation():
+    result = split_sentences("First sentence. Second sentence! Third sentence?")
+    assert result == ["First sentence.", "Second sentence!", "Third sentence?"]
+
+
+def test_split_sentences_single_sentence_returns_itself():
+    assert split_sentences("Only one sentence here.") == ["Only one sentence here."]
+
+
+def test_split_sentences_no_terminal_punctuation_returns_whole_text():
+    assert split_sentences("no punctuation at all") == ["no punctuation at all"]
