@@ -5,9 +5,19 @@ unaffected by playback-rate changes the frontend applies at playback time.
 """
 
 import re
+from dataclasses import dataclass
 
 from readaloud.models.schemas import Cue
 from readaloud.services.text_chunker import split_sentences
+
+
+@dataclass(frozen=True)
+class WordTimestamp:
+    """One word's real timing, as reported by the TTS server."""
+
+    word: str
+    start: float
+    end: float
 
 
 def compute_cues(chunk_texts: list[str], chunk_durations: list[float]) -> list[Cue]:
