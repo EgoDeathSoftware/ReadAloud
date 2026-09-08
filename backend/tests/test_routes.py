@@ -261,7 +261,9 @@ async def test_long_text_streams_chunks_and_keeps_them_readable(temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(side_effect=[b"one", b"two", b"three"])
+        mock_client.generate_speech_with_timestamps = AsyncMock(
+            side_effect=[(b"one", None), (b"two", None), (b"three", None)]
+        )
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -280,7 +282,7 @@ async def test_long_text_job_status_includes_cues(temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"mp3data", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -303,7 +305,7 @@ async def test_long_text_job_status_cues_have_nonzero_duration(temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=audio)
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(audio, None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -326,7 +328,7 @@ async def test_known_chunk_hash_skips_synthesis(temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"synth-b")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"synth-b", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -334,8 +336,8 @@ async def test_known_chunk_hash_skips_synthesis(temp_job_store):
             job_id, ["a", "b"], "af_heart", "kokoro", 1.0, {known_hash: b"cached-a"}
         )
 
-    assert mock_client.generate_speech.await_count == 1
-    assert mock_client.generate_speech.await_args.args[0] == "b"
+    assert mock_client.generate_speech_with_timestamps.await_count == 1
+    assert mock_client.generate_speech_with_timestamps.await_args.args[0] == "b"
     assert temp_job_store.read_chunk(job_id, 0) == b"cached-a"
     assert temp_job_store.read_chunk(job_id, 1) == b"synth-b"
     assert jobs[job_id].chunks[0].source == "client_cache"
@@ -350,13 +352,13 @@ async def test_process_long_text_without_known_chunks_synthesizes_everything(tem
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"synth-only")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"synth-only", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
         await tts_routes._process_long_text(job_id, ["only"], "af_heart", "kokoro", 1.0)
 
-    assert mock_client.generate_speech.await_count == 1
+    assert mock_client.generate_speech_with_timestamps.await_count == 1
     assert jobs[job_id].chunks[0].source == "synthesized"
 
 
@@ -374,7 +376,7 @@ def test_tts_generate_known_chunk_skips_synthesis_end_to_end(client, temp_job_st
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"synth-audio")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"synth-audio", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -393,7 +395,7 @@ def test_tts_generate_known_chunk_skips_synthesis_end_to_end(client, temp_job_st
             time_module.sleep(0.01)
 
     assert jobs[job_id].status == "complete"
-    assert mock_client.generate_speech.await_count == 1
+    assert mock_client.generate_speech_with_timestamps.await_count == 1
     assert temp_job_store.read_chunk(job_id, 0) == b"cached-audio"
     assert temp_job_store.read_chunk(job_id, 1) == b"synth-audio"
 
@@ -413,7 +415,7 @@ def test_tts_generate_drops_malformed_known_chunk_audio(client, temp_job_store, 
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"synth")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"synth", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -432,7 +434,7 @@ def test_tts_generate_drops_malformed_known_chunk_audio(client, temp_job_store, 
             time_module.sleep(0.01)
 
     assert jobs[job_id].status == "complete"
-    assert mock_client.generate_speech.await_count == 2
+    assert mock_client.generate_speech_with_timestamps.await_count == 2
 
 
 def test_tts_generate_rejects_too_many_known_chunks(client):
@@ -451,7 +453,9 @@ async def test_chunk_endpoint_serves_a_completed_job(client, temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(side_effect=[b"one", b"two"])
+        mock_client.generate_speech_with_timestamps = AsyncMock(
+            side_effect=[(b"one", None), (b"two", None)]
+        )
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
         await tts_routes._process_long_text(job_id, ["a", "b"], "af_heart", "kokoro", 1.0)
@@ -467,7 +471,9 @@ async def test_failed_long_job_records_the_error(temp_job_store):
 
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(side_effect=RuntimeError("tts exploded"))
+        mock_client.generate_speech_with_timestamps = AsyncMock(
+            side_effect=RuntimeError("tts exploded")
+        )
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -513,3 +519,47 @@ def test_shutdown_purges_job_storage(temp_job_store):
     with TestClient(tts_routes_app()):
         pass
     assert temp_job_store.read_final("job-1") is None
+
+
+async def test_mixed_cache_and_synthesis_times_only_the_synthesized_chunk(temp_job_store):
+    import hashlib
+
+    from readaloud.services.mp3_frames import frame_duration_seconds, real_audio_frames
+    from readaloud.services.reading_cues import WordTimestamp
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "mixed-cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+
+    audio = build_frame(bitrate_index=1, samplerate_index=0, mode=0) * 20  # ~0.52s
+    cached_text, synth_text = "Cached chunk.", "Fresh chunk."
+    cached_hash = hashlib.sha256(cached_text.encode("utf-8")).hexdigest()
+    timestamps = [
+        WordTimestamp(word="Fresh", start=0.05, end=0.30),
+        WordTimestamp(word="chunk", start=0.30, end=0.45),
+        WordTimestamp(word=".", start=0.45, end=0.50),
+    ]
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(audio, timestamps))
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id,
+            [cached_text, synth_text],
+            "af_heart",
+            "kokoro",
+            1.0,
+            {cached_hash: audio},
+        )
+
+    job = jobs[job_id]
+    assert mock_client.generate_speech_with_timestamps.await_count == 1
+    assert [c.source for c in job.chunks] == ["client_cache", "synthesized"]
+    assert [c.text for c in job.cues] == ["Cached", "chunk.", "Fresh", "chunk."]
+
+    offset = frame_duration_seconds(real_audio_frames(audio))
+    assert job.cues[2].start == pytest.approx(offset + 0.05)
+    assert job.cues[3].end == pytest.approx(offset + 0.50)

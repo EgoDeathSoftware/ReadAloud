@@ -20,7 +20,7 @@ from readaloud.models.schemas import (
 )
 from readaloud.services.job_store import job_store
 from readaloud.services.mp3_frames import frame_duration_seconds, real_audio_frames
-from readaloud.services.reading_cues import compute_cues
+from readaloud.services.reading_cues import WordTimestamp, compute_cues
 from readaloud.services.text_chunker import chunk_text
 from readaloud.services.tts_client import TtsClient
 
@@ -98,11 +98,14 @@ async def _process_long_text(
 
     A chunk whose hash is already in `known_by_hash` uses those bytes instead of
     calling the TTS server -- the client already has this audio from a prior
-    session and uploaded it rather than asking for it to be resynthesized.
+    session and uploaded it rather than asking for it to be resynthesized. Such
+    a chunk has no real timestamps, since it was never sent to the TTS server
+    this request.
     """
     job = jobs[job_id]
     client = TtsClient()
     known_by_hash = known_by_hash or {}
+    timestamps_by_chunk: list[list[WordTimestamp] | None] = []
 
     try:
         for i, chunk in enumerate(chunks):
@@ -111,9 +114,13 @@ async def _process_long_text(
             if cached_audio is not None:
                 audio = cached_audio
                 source = "client_cache"
+                timestamps_by_chunk.append(None)
             else:
-                audio = await client.generate_speech(chunk, voice, model, speed)
+                audio, timestamps = await client.generate_speech_with_timestamps(
+                    chunk, voice, model, speed
+                )
                 source = "synthesized"
+                timestamps_by_chunk.append(timestamps)
 
             job_store.write_chunk(job_id, i, audio)
             job.chunks.append(ChunkStatus(index=i, hash=chunk_hash, source=source))
@@ -122,7 +129,7 @@ async def _process_long_text(
 
         job_store.finalize_from_chunks(job_id, len(chunks))
         try:
-            job.cues = _job_cues(job_id, chunks)
+            job.cues = _job_cues(job_id, chunks, timestamps_by_chunk)
         except Exception:
             logger.warning("Failed to compute reading cues for job %s", job_id, exc_info=True)
         job.status = "complete"
@@ -133,7 +140,11 @@ async def _process_long_text(
         await client.close()
 
 
-def _job_cues(job_id: str, chunks: list[str]) -> list[Cue]:
+def _job_cues(
+    job_id: str,
+    chunks: list[str],
+    timestamps_by_chunk: list[list[WordTimestamp] | None],
+) -> list[Cue]:
     """Compute reading cues from each chunk's finalized audio.
 
     Reads chunks back from `job_store` rather than the bytes just
@@ -144,7 +155,7 @@ def _job_cues(job_id: str, chunks: list[str]) -> list[Cue]:
     for index in range(len(chunks)):
         audio = job_store.read_chunk(job_id, index) or b""
         durations.append(frame_duration_seconds(real_audio_frames(audio)))
-    return compute_cues(chunks, durations, [None] * len(chunks))
+    return compute_cues(chunks, durations, timestamps_by_chunk)
 
 
 def _decode_known_chunks(known_chunks: list[KnownChunk]) -> dict[str, bytes]:
