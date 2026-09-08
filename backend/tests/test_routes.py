@@ -139,7 +139,7 @@ def test_settings_get_never_leaks_api_key(client, monkeypatch):
 def test_tts_generate_short_text(client, temp_job_store):
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"mp3data", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -159,7 +159,7 @@ def test_tts_generate_short_text(client, temp_job_store):
 def test_tts_generate_short_text_includes_cues(client, temp_job_store):
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"mp3data", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
 
@@ -181,7 +181,7 @@ def test_job_state_holds_no_audio_bytes(client, temp_job_store):
     """Audio lives on disk; the in-memory job table keeps metadata only."""
     with patch("readaloud.routes.tts.TtsClient") as mock_cls:
         mock_client = MagicMock()
-        mock_client.generate_speech = AsyncMock(return_value=b"mp3data")
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(b"mp3data", None))
         mock_client.close = AsyncMock()
         mock_cls.return_value = mock_client
         response = client.post("/api/tts/generate", json={"text": "Short text"})

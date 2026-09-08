@@ -183,13 +183,15 @@ async def generate_tts(
     if len(request.text) <= settings.MAX_CHUNK_CHARS:
         client = TtsClient()
         try:
-            audio = await client.generate_speech(request.text, voice, model, request.speed)
+            audio, timestamps = await client.generate_speech_with_timestamps(
+                request.text, voice, model, request.speed
+            )
         finally:
             await client.close()
 
         job_store.write_final(job_id, audio)
         cues = compute_cues(
-            [request.text], [frame_duration_seconds(real_audio_frames(audio))], [None]
+            [request.text], [frame_duration_seconds(real_audio_frames(audio))], [timestamps]
         )
         jobs[job_id] = JobState(
             id=job_id,
