@@ -21,8 +21,8 @@ export function ReadingText({ cues, activeCueIndex }: ReadingTextProps) {
           ref={index === activeCueIndex ? activeRef : null}
           className={
             index === activeCueIndex
-              ? "reading-text__sentence reading-text__sentence--active"
-              : "reading-text__sentence"
+              ? "reading-text__word reading-text__word--active"
+              : "reading-text__word"
           }
         >
           {cue.text}{" "}

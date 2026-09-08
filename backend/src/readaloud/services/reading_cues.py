@@ -58,11 +58,31 @@ def _cues_for_chunk(text: str, duration: float, offset: float) -> list[Cue]:
             end = start + duration * (len(sentence) / total_chars)
             is_last_sentence_in_para = sent_index == len(para_sentences) - 1
             is_last_paragraph = para_index == len(sentences_by_paragraph) - 1
-            cue_text = (
-                sentence + "\n\n"
-                if is_last_sentence_in_para and not is_last_paragraph
-                else sentence
-            )
-            cues.append(Cue(text=cue_text, start=start, end=end))
+            suffix = "\n\n" if is_last_sentence_in_para and not is_last_paragraph else ""
+            cues.extend(_cues_for_sentence(sentence, start, end, suffix))
             start = end
+    return cues
+
+
+def _cues_for_sentence(sentence: str, start: float, end: float, suffix: str) -> list[Cue]:
+    """Split one sentence's allotted time span across its words.
+
+    Words share the span proportional to their character length, the same
+    proportional approach `_cues_for_chunk` uses for sentences -- there is no
+    real per-word timing from the TTS server to split on.
+    """
+    words = sentence.split()
+    total_chars = sum(len(word) for word in words)
+    if not words or total_chars == 0:
+        return []
+
+    duration = end - start
+    cues: list[Cue] = []
+    cursor = start
+    for index, word in enumerate(words):
+        word_end = cursor + duration * (len(word) / total_chars)
+        is_last_word = index == len(words) - 1
+        cue_text = word + suffix if is_last_word else word
+        cues.append(Cue(text=cue_text, start=cursor, end=word_end))
+        cursor = word_end
     return cues

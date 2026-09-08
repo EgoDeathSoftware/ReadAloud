@@ -170,8 +170,10 @@ def test_tts_generate_short_text_includes_cues(client, temp_job_store):
 
     data = response.json()
     assert [cue["text"] for cue in data["cues"]] == [
-        "First sentence.",
-        "Second sentence.",
+        "First",
+        "sentence.",
+        "Second",
+        "sentence.",
     ]
 
 
@@ -287,7 +289,7 @@ async def test_long_text_job_status_includes_cues(temp_job_store):
         )
 
     job = jobs[job_id]
-    assert [cue.text for cue in job.cues] == ["Chunk one.", "Chunk two."]
+    assert [cue.text for cue in job.cues] == ["Chunk", "one.", "Chunk", "two."]
 
 
 async def test_long_text_job_status_cues_have_nonzero_duration(temp_job_store):

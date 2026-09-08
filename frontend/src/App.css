@@ -161,11 +161,11 @@ body {
   line-height: 1.6;
 }
 
-.reading-text__sentence {
+.reading-text__word {
   white-space: pre-wrap;
 }
 
-.reading-text__sentence--active {
+.reading-text__word--active {
   background: var(--primary);
   color: #fff;
   border-radius: 3px;
