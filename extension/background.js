@@ -1,6 +1,12 @@
 import { pickAdapter } from "/lib/adapters/index.js";
+import { backendAdapter } from "/lib/adapters/backend.js";
+import { chunkCache } from "/lib/chunk-cache.js";
+import { chunkText } from "/lib/chunker.js";
 import { createPlayer } from "/lib/player.js";
+import { sha256Hex } from "/lib/hash.js";
 import { loadSettings } from "/lib/settings.js";
+import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
+import { sliceFromArticle } from "/lib/read-from-here.js";
 
 const state = {
   phase: "idle",
@@ -44,6 +50,38 @@ function stopAll() {
   broadcastState();
 }
 
+function blobToBase64(blob) {
+  return blob.arrayBuffer().then((buffer) => {
+    let binary = "";
+    for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  });
+}
+
+/**
+ * Chunk `text` the same way the backend will, and offer back the audio for any
+ * chunk already cached this session -- lets the server skip resynthesizing it.
+ * Best-effort: any failure (unreachable backend, aborted read) just means no
+ * chunks are offered, falling back to full synthesis.
+ */
+async function buildKnownChunks(text, voice, settings, signal) {
+  try {
+    const response = await fetch(`${settings.backendUrl}/api/settings`, { signal });
+    if (!response.ok) return [];
+    const { max_chunk_chars: maxChunkChars } = await response.json();
+
+    const knownChunks = [];
+    for (const chunk of chunkText(text, maxChunkChars)) {
+      const hash = await sha256Hex(chunk);
+      const blob = chunkCache.get(voice, hash);
+      if (blob) knownChunks.push({ hash, audioB64: await blobToBase64(blob) });
+    }
+    return knownChunks;
+  } catch {
+    return [];
+  }
+}
+
 async function handleReadRequest(text, voice, speed) {
   stopAll();
 
@@ -54,16 +92,23 @@ async function handleReadRequest(text, voice, speed) {
 
   const settings = await loadSettings();
   const adapter = pickAdapter(settings);
+  const resolvedVoice = voice || settings.defaultVoice;
   abortController = new AbortController();
 
   player.setSpeed(speed || settings.defaultSpeed);
   setPhase("generating");
 
+  const knownChunks =
+    adapter === backendAdapter
+      ? await buildKnownChunks(text, resolvedVoice, settings, abortController.signal)
+      : [];
+
   const generator = adapter.synthesize({
     text,
-    voice: voice || settings.defaultVoice,
+    voice: resolvedVoice,
     settings,
     signal: abortController.signal,
+    knownChunks,
     onProgress: ({ chunksCompleted, chunksTotal, progress }) => {
       state.chunksCompleted = chunksCompleted;
       state.chunksTotal = chunksTotal;
@@ -87,30 +132,130 @@ async function handleReadRequest(text, voice, speed) {
   }
 }
 
-async function handleReadPage(tabId, voice, speed) {
+// Inject Readability.js first (defines the global), then run the extractor.
+// Returns the extracted article text, or null if nothing could be extracted.
+async function extractArticleText(tab) {
+  await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
+  const results = await browser.tabs.executeScript(tab.id, { file: "content.js" });
+  const article = results && results[0];
+  if (!article || !article.text || article.text.trim().length === 0) return null;
+  return article.text;
+}
+
+async function handleReadPage(tab, voice, speed) {
   stopAll();
+
+  if (await isPdfTab(tab.url)) {
+    await handleReadPdf(tab, voice, speed);
+    return;
+  }
+
   setPhase("extracting");
 
   try {
-    // Inject Readability.js first (defines the global), then run the extractor.
-    await browser.tabs.executeScript(tabId, { file: "Readability.js" });
-    const results = await browser.tabs.executeScript(tabId, { file: "content.js" });
-    const article = results && results[0];
-
-    if (!article || !article.text || article.text.trim().length === 0) {
+    const text = await extractArticleText(tab);
+    if (!text) {
       setError("No article content could be extracted from this page");
       return;
     }
 
-    await handleReadRequest(article.text, voice, speed);
+    await handleReadRequest(text, voice, speed);
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
+  }
+}
+
+async function handleReadFromHere(tab, selectionText, voice, speed) {
+  stopAll();
+  setPhase("extracting");
+
+  try {
+    const articleText = await extractArticleText(tab);
+    if (!articleText) {
+      setError("No article content could be extracted from this page");
+      return;
+    }
+
+    const fromHere = sliceFromArticle(articleText, selectionText);
+    if (!fromHere) {
+      setError("Could not find that selection in the page text");
+      return;
+    }
+
+    await handleReadRequest(fromHere, voice, speed);
+  } catch (err) {
+    setError(`Extraction failed: ${err.message}`);
+  }
+}
+
+function fetchAsBlob(url, signal) {
+  return fetch(url, { signal }).then((response) => {
+    if (!response.ok) throw new Error(`Could not fetch PDF: ${response.status}`);
+    return response.blob();
+  });
+}
+
+// The background page cannot fetch() or XHR a file:// URL directly — Firefox
+// blocks that at the network layer regardless of the "Allow access to file
+// URLs" extension setting. That setting instead controls whether extension
+// code may run *inside* a file:// tab, so read the bytes from within the tab
+// itself (same-origin fetch of its own location) via executeScript.
+function fetchFileTabBytes(tabId) {
+  return browser.tabs
+    .executeScript(tabId, {
+      code: "fetch(location.href).then((r) => r.arrayBuffer())",
+    })
+    .then((results) => {
+      const arrayBuffer = results && results[0];
+      if (!arrayBuffer) throw new Error("Could not read local file");
+      return new Blob([arrayBuffer], { type: "application/pdf" });
+    });
+}
+
+async function handleReadPdf(tab, voice, speed) {
+  setPhase("extracting");
+  abortController = new AbortController();
+  const { signal } = abortController;
+
+  try {
+    const sourceUrl = resolvePdfSourceUrl(tab.url);
+    const pdfBytes = sourceUrl.startsWith("file:")
+      ? await fetchFileTabBytes(tab.id)
+      : await fetchAsBlob(sourceUrl, signal);
+
+    const settings = await loadSettings();
+    const form = new FormData();
+    form.append("file", pdfBytes, "document.pdf");
+
+    const extractResponse = await fetch(`${settings.backendUrl}/api/extract/pdf`, {
+      method: "POST",
+      body: form,
+      signal,
+    });
+    if (!extractResponse.ok) {
+      const body = await extractResponse.text().catch(() => "");
+      throw new Error(`${extractResponse.status}: ${body}`);
+    }
+    const { text } = await extractResponse.json();
+
+    await handleReadRequest(text, voice, speed);
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    setError(`Could not read PDF: ${err.message}`);
+  } finally {
+    abortController = null;
   }
 }
 
 browser.contextMenus.create({
   id: "readaloud-selection",
   title: "ReadAloud: Read Selection",
+  contexts: ["selection"],
+});
+
+browser.contextMenus.create({
+  id: "readaloud-from-here",
+  title: "ReadAloud: Read From Here",
   contexts: ["selection"],
 });
 
@@ -124,8 +269,10 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const settings = await loadSettings();
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
     handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
+  } else if (info.menuItemId === "readaloud-from-here" && info.selectionText && tab.id) {
+    handleReadFromHere(tab, info.selectionText, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
-    handleReadPage(tab.id, settings.defaultVoice, settings.defaultSpeed);
+    handleReadPage(tab, settings.defaultVoice, settings.defaultSpeed);
   }
 });
 
@@ -158,7 +305,7 @@ browser.runtime.onMessage.addListener((message) => {
         .query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
-          handleReadPage(tabs[0].id, message.voice, message.speed);
+          handleReadPage(tabs[0], message.voice, message.speed);
         })
         .catch((err) => setError(`Could not read page: ${err.message}`));
 

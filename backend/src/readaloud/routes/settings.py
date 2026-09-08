@@ -17,4 +17,5 @@ async def get_settings() -> SettingsResponse:
         tts_base_url=settings.TTS_BASE_URL,
         tts_model=settings.TTS_MODEL,
         tts_default_voice=settings.TTS_DEFAULT_VOICE,
+        max_chunk_chars=settings.MAX_CHUNK_CHARS,
     )

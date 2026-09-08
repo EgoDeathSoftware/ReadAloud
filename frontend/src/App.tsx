@@ -4,6 +4,7 @@ import { TextInput } from "src/components/TextInput.tsx";
 import { UrlInput } from "src/components/UrlInput.tsx";
 import { VoiceSelector } from "src/components/VoiceSelector.tsx";
 import { AudioPlayer } from "src/components/AudioPlayer.tsx";
+import { ReadingText } from "src/components/ReadingText.tsx";
 import { SettingsPanel } from "src/components/SettingsPanel.tsx";
 import {
   GenerationProgress,
@@ -15,6 +16,8 @@ import "src/App.css";
 export function App() {
   const [text, setText] = useState("");
   const [voice, setVoice] = useState("af_heart");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [activeCueIndex, setActiveCueIndex] = useState<number | null>(null);
   const tts = useTts();
   const settings = useSettingsStore();
 
@@ -30,11 +33,12 @@ export function App() {
 
   function handleGenerate() {
     if (!text.trim()) return;
+    // Speed is applied by the player via playbackRate, never at generation time —
+    // sending it here too would multiply the two rates together.
     tts.generate(
       text,
       voice || undefined,
       settings.tts_model || undefined,
-      settings.speed,
     );
   }
 
@@ -45,11 +49,15 @@ export function App() {
         disabled={isGenerating}
       />
 
-      <TextInput
-        value={text}
-        onChange={setText}
-        disabled={isGenerating}
-      />
+      {isPlaying ? (
+        <ReadingText cues={tts.cues} activeCueIndex={activeCueIndex} />
+      ) : (
+        <TextInput
+          value={text}
+          onChange={setText}
+          disabled={isGenerating}
+        />
+      )}
 
       <div className="controls">
         <VoiceSelector
@@ -78,7 +86,12 @@ export function App() {
         <div className="error-message">{tts.error}</div>
       )}
 
-      <AudioPlayer audioUrl={tts.audioUrl} />
+      <AudioPlayer
+        audioUrl={tts.audioUrl}
+        cues={tts.cues}
+        onPlayingChange={setIsPlaying}
+        onCueChange={setActiveCueIndex}
+      />
 
       <SettingsPanel />
     </Layout>

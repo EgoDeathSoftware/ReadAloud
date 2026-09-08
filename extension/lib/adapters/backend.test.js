@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { chunkCache } from "/lib/chunk-cache.js";
 import { backendAdapter } from "./backend.js";
 import { pickAdapter } from "./index.js";
 import { openaiAdapter } from "./openai.js";
@@ -35,6 +36,7 @@ function run(overrides = {}) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  chunkCache.clear();
 });
 
 describe("pickAdapter", () => {
@@ -132,5 +134,81 @@ describe("synthesize", () => {
   it("surfaces a non-ok generate response", async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({}, 500));
     await expect(run()).rejects.toThrow(/500/);
+  });
+
+  it("sends known_chunks in the generate request body", async () => {
+    let sentBody = null;
+    globalThis.fetch = vi.fn(async (url, options) => {
+      if (url.endsWith("/api/tts/generate")) {
+        sentBody = JSON.parse(options.body);
+        return jsonResponse({ job_id: "j5", status: "complete" });
+      }
+      return blobResponse();
+    });
+
+    await run({ knownChunks: [{ hash: "abc123", audioB64: "ZmFrZQ==" }] });
+    expect(sentBody.known_chunks).toEqual([{ hash: "abc123", audio_b64: "ZmFrZQ==" }]);
+  });
+
+  it("omits known_chunks from the body when there are none", async () => {
+    let sentBody = null;
+    globalThis.fetch = vi.fn(async (url, options) => {
+      if (url.endsWith("/api/tts/generate")) {
+        sentBody = JSON.parse(options.body);
+        return jsonResponse({ job_id: "j6", status: "complete" });
+      }
+      return blobResponse();
+    });
+
+    await run();
+    expect(sentBody.known_chunks).toBeUndefined();
+  });
+
+  it("plays a client_cache-sourced chunk from the local cache without fetching its audio", async () => {
+    const cachedBlob = new Blob(["cached"], { type: "audio/mpeg" });
+    chunkCache.set("af_heart", "hash-a", cachedBlob);
+
+    const fetchedAudioUrls = [];
+    globalThis.fetch = vi.fn(async (url) => {
+      fetchedAudioUrls.push(url);
+      if (url.endsWith("/api/tts/generate")) {
+        return jsonResponse({ job_id: "j7", status: "processing" });
+      }
+      if (url.includes("/api/tts/status/")) {
+        return jsonResponse({
+          status: "complete",
+          progress: 1,
+          chunks_completed: 1,
+          chunks_total: 1,
+          chunks: [{ index: 0, hash: "hash-a", source: "client_cache" }],
+        });
+      }
+      return blobResponse();
+    });
+
+    const results = await run({ voice: "af_heart" });
+    expect(results[0].audio).toBe(cachedBlob);
+    expect(fetchedAudioUrls.some((u) => u.includes("/api/tts/audio/"))).toBe(false);
+  });
+
+  it("fetches and caches a synthesized chunk under its reported hash", async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.endsWith("/api/tts/generate")) {
+        return jsonResponse({ job_id: "j8", status: "processing" });
+      }
+      if (url.includes("/api/tts/status/")) {
+        return jsonResponse({
+          status: "complete",
+          progress: 1,
+          chunks_completed: 1,
+          chunks_total: 1,
+          chunks: [{ index: 0, hash: "hash-b", source: "synthesized" }],
+        });
+      }
+      return blobResponse();
+    });
+
+    await run({ voice: "af_heart" });
+    expect(chunkCache.get("af_heart", "hash-b")).not.toBeNull();
   });
 });

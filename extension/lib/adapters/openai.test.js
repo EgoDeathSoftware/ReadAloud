@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { chunkCache } from "/lib/chunk-cache.js";
 import { openaiAdapter } from "./openai.js";
 
 const settings = {
@@ -21,6 +22,16 @@ function blobResponse(bytes) {
   return { ok: true, status: 200, blob: async () => new Blob([bytes], { type: "audio/mpeg" }) };
 }
 
+function errorResponse(body, status, headers = {}) {
+  return {
+    ok: false,
+    status,
+    headers: { get: (name) => headers[name] ?? null },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
+}
+
 async function collect(generator) {
   const out = [];
   for await (const item of generator) out.push(item);
@@ -40,6 +51,7 @@ function synth(overrides = {}) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  chunkCache.clear();
 });
 
 describe("listVoices", () => {
@@ -77,6 +89,32 @@ describe("listVoices", () => {
 });
 
 describe("synthesize", () => {
+  it("does not re-request a chunk already in the cache", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return blobResponse("audio");
+    });
+
+    await collect(synth());
+    expect(calls).toBe(1);
+
+    await collect(synth());
+    expect(calls).toBe(1);
+  });
+
+  it("caches per voice, so a different voice still requests", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return blobResponse("audio");
+    });
+
+    await collect(synth({ voice: "af_heart" }));
+    await collect(synth({ voice: "am_adam" }));
+    expect(calls).toBe(2);
+  });
+
   it("posts one request per chunk and yields a blob each", async () => {
     const calls = [];
     globalThis.fetch = vi.fn(async (url, options) => {
@@ -141,6 +179,48 @@ describe("synthesize", () => {
       jsonResponse({ error: { message: "Invalid voice: bogus" } }, 400),
     );
     await expect(collect(synth({ voice: "bogus" }))).rejects.toThrow(/Invalid voice: bogus/);
+  });
+
+  it("does not retry a 400 (permanent failure)", async () => {
+    let attempts = 0;
+    globalThis.fetch = vi.fn(async () => {
+      attempts += 1;
+      return errorResponse({ error: { message: "Invalid voice: bogus" } }, 400);
+    });
+    await expect(collect(synth({ voice: "bogus" }))).rejects.toThrow(/Invalid voice: bogus/);
+    expect(attempts).toBe(1);
+  });
+
+  it("retries a 429 honoring the Retry-After header", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let attempts = 0;
+      globalThis.fetch = vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return errorResponse(
+            { error: { message: "rate limited" } },
+            429,
+            { "Retry-After": "7" },
+          );
+        }
+        return blobResponse("audio");
+      });
+      const sleepSpy = vi.spyOn(globalThis, "setTimeout");
+      const resultsPromise = collect(synth());
+      // synthesize() now hashes the chunk (a real, setImmediate-backed async
+      // op) before its first fetch attempt. Let that settle on the real event
+      // loop before advancing fake time, or the retry's setTimeout call never
+      // gets scheduled in time for advanceTimersByTimeAsync to see it.
+      await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(7000);
+      const results = await resultsPromise;
+      expect(attempts).toBe(2);
+      expect(results).toHaveLength(1);
+      expect(sleepSpy).toHaveBeenCalledWith(expect.any(Function), 7000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("aborts without retrying when the signal fires", async () => {

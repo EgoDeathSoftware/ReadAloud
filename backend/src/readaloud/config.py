@@ -11,9 +11,38 @@ class Settings(BaseSettings):
     TTS_DEFAULT_VOICE: str = "af_heart"
     TTS_API_KEY: str = ""
     MAX_CHUNK_CHARS: int = 4000
+    # Comma-separated browser origins allowed to call the API. Empty means
+    # DEFAULT_ALLOWED_ORIGINS. Declared as a string rather than list[str] because
+    # pydantic-settings would otherwise expect JSON in the environment variable.
+    ALLOWED_ORIGINS: str = ""
 
 
 settings = Settings()
+
+DEFAULT_ALLOWED_ORIGINS = [
+    # Vite dev server
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    # Backend serving frontend/dist in production
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+# The WebExtension calls the API from its own origin. MV2 host permissions already
+# let it bypass CORS, so allowing the scheme grants nothing an installed extension
+# does not already have.
+EXTENSION_ORIGIN_REGEX = r"^(moz|chrome)-extension://[A-Za-z0-9._-]+$"
+
+
+def allowed_origins() -> list[str]:
+    """Browser origins permitted to call the API.
+
+    Never returns "*": a wildcard lets any page the user visits drive TTS
+    generation and read back extracted page content.
+    """
+    configured = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",")]
+    configured = [origin for origin in configured if origin]
+    return configured or list(DEFAULT_ALLOWED_ORIGINS)
 
 
 def auth_headers() -> dict[str, str]:

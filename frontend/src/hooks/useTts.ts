@@ -4,6 +4,7 @@ import {
   getTtsStatus,
   getTtsAudioUrl,
 } from "src/api/client.ts";
+import type { Cue } from "src/api/types.ts";
 
 type TtsState =
   | "idle"
@@ -18,13 +19,9 @@ interface UseTtsResult {
   chunksCompleted: number;
   chunksTotal: number;
   audioUrl: string | null;
+  cues: Cue[];
   error: string | null;
-  generate: (
-    text: string,
-    voice?: string,
-    model?: string,
-    speed?: number,
-  ) => void;
+  generate: (text: string, voice?: string, model?: string) => void;
   reset: () => void;
 }
 
@@ -43,6 +40,7 @@ export function useTts(): UseTtsResult {
   const [chunksCompleted, setChunksCompleted] = useState(0);
   const [chunksTotal, setChunksTotal] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [cues, setCues] = useState<Cue[]>([]);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const blobUrlRef = useRef<string | null>(null);
@@ -88,6 +86,7 @@ export function useTts(): UseTtsResult {
     setChunksCompleted(0);
     setChunksTotal(0);
     setAudioUrl(null);
+    setCues([]);
     setError(null);
   }, [clearTimer, revokeBlobUrl]);
 
@@ -103,6 +102,7 @@ export function useTts(): UseTtsResult {
 
             if (status.status === "complete") {
               clearTimer();
+              setCues(status.cues);
               setAudioBlobUrl(getTtsAudioUrl(jobId), () =>
                 setState("complete"),
               );
@@ -125,21 +125,18 @@ export function useTts(): UseTtsResult {
   );
 
   const generate = useCallback(
-    (
-      text: string,
-      voice?: string,
-      model?: string,
-      speed?: number,
-    ) => {
+    (text: string, voice?: string, model?: string) => {
       clearTimer();
       setState("generating");
       setProgress(0);
       setError(null);
       setAudioUrl(null);
+      setCues([]);
 
-      generateTts({ text, voice, model, speed })
+      generateTts({ text, voice, model })
         .then((resp) => {
           if (resp.status === "complete") {
+            setCues(resp.cues);
             setAudioBlobUrl(getTtsAudioUrl(resp.job_id), () =>
               setState("complete"),
             );
@@ -168,6 +165,7 @@ export function useTts(): UseTtsResult {
     chunksCompleted,
     chunksTotal,
     audioUrl,
+    cues,
     error,
     generate,
     reset,
