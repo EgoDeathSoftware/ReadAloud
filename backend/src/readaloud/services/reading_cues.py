@@ -24,35 +24,58 @@ _PUNCTUATION_ONLY = re.compile(r"[^\w\s]+")
 MIN_TIMESTAMP_COVERAGE = 0.8
 
 
-def compute_cues(chunk_texts: list[str], chunk_durations: list[float]) -> list[Cue]:
-    """Build sentence-level playback cues for a sequence of TTS chunks.
+def compute_cues(
+    chunk_texts: list[str],
+    chunk_durations: list[float],
+    chunk_timestamps: list[list[WordTimestamp] | None],
+) -> list[Cue]:
+    """Build word-level playback cues for a sequence of TTS chunks.
 
-    Each chunk's real audio duration is split across its own sentences,
-    proportional to sentence character length. Sentences never cross chunk
-    boundaries, so a chunk produced by splitting an oversized sentence
-    across multiple TTS calls (see `text_chunker._split_long_sentence`)
-    yields one cue per chunk piece rather than trying to recombine them.
+    Each chunk is timed by the TTS server's real per-word timestamps when it
+    has them and they line up with its words. Otherwise its real audio
+    duration is split across its own words proportional to character length.
+    Chunks are independent, so a job can mix both -- e.g. a chunk whose
+    audio came from the client's local cache was never sent to the TTS
+    server this request and has no timestamps at all.
+
+    Cue text always comes from `chunk_texts`, never from the timestamps:
+    the server reports the words it actually spoke, which its text
+    normalizer may have rewritten.
 
     Args:
         chunk_texts: Chunk text, in playback order -- the same list passed
             to the TTS server for synthesis.
         chunk_durations: Each chunk's real audio duration in seconds, same
             order and length as `chunk_texts`.
+        chunk_timestamps: Each chunk's real word timestamps from the TTS
+            server, or None if unavailable for that chunk. Same order and
+            length as `chunk_texts`.
 
     Returns:
         Cues in playback order, with `start`/`end` in the stitched audio's
         timeline (seconds).
 
     Raises:
-        ValueError: If `chunk_texts` and `chunk_durations` differ in length.
+        ValueError: If the three lists differ in length.
     """
-    if len(chunk_texts) != len(chunk_durations):
-        raise ValueError("chunk_texts and chunk_durations must be the same length")
+    if not (len(chunk_texts) == len(chunk_durations) == len(chunk_timestamps)):
+        raise ValueError(
+            "chunk_texts, chunk_durations, and chunk_timestamps must be the same length"
+        )
 
     cues: list[Cue] = []
     offset = 0.0
-    for text, duration in zip(chunk_texts, chunk_durations, strict=True):
-        cues.extend(_cues_for_chunk(text, duration, offset))
+    for text, duration, timestamps in zip(
+        chunk_texts, chunk_durations, chunk_timestamps, strict=True
+    ):
+        real_cues = (
+            _cues_from_timestamps(text, timestamps, offset, duration)
+            if timestamps is not None
+            else None
+        )
+        if real_cues is None:
+            real_cues = _cues_for_chunk(text, duration, offset)
+        cues.extend(real_cues)
         offset += duration
     return cues
 

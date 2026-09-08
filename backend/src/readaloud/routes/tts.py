@@ -144,7 +144,7 @@ def _job_cues(job_id: str, chunks: list[str]) -> list[Cue]:
     for index in range(len(chunks)):
         audio = job_store.read_chunk(job_id, index) or b""
         durations.append(frame_duration_seconds(real_audio_frames(audio)))
-    return compute_cues(chunks, durations)
+    return compute_cues(chunks, durations, [None] * len(chunks))
 
 
 def _decode_known_chunks(known_chunks: list[KnownChunk]) -> dict[str, bytes]:
@@ -188,7 +188,9 @@ async def generate_tts(
             await client.close()
 
         job_store.write_final(job_id, audio)
-        cues = compute_cues([request.text], [frame_duration_seconds(real_audio_frames(audio))])
+        cues = compute_cues(
+            [request.text], [frame_duration_seconds(real_audio_frames(audio))], [None]
+        )
         jobs[job_id] = JobState(
             id=job_id,
             status="complete",
