@@ -251,6 +251,32 @@ def test_cues_from_timestamps_are_contiguous():
         assert earlier.end == later.start
 
 
+def test_cues_from_timestamps_clamps_negative_first_start_to_chunk_offset():
+    # Observed Kokoro behavior: a chunk's first word can report a small
+    # negative start_time. Left unclamped, offsetting it by the chunk's own
+    # offset would start the cue before the chunk begins, overlapping the
+    # previous chunk's last cue.
+    timestamps = [
+        WordTimestamp(word="We", start=-0.0303, end=0.2),
+        WordTimestamp(word="agree.", start=0.2, end=0.9),
+    ]
+    cues = _cues_from_timestamps("We agree.", timestamps, offset=10.0, duration=1.0)
+
+    assert cues[0].start == pytest.approx(10.0)
+
+
+def test_cues_from_timestamps_stays_contiguous_and_full_duration_with_negative_start():
+    timestamps = [
+        WordTimestamp(word="We", start=-0.0303, end=0.2),
+        WordTimestamp(word="agree.", start=0.2, end=0.9),
+    ]
+    cues = _cues_from_timestamps("We agree.", timestamps, offset=10.0, duration=1.0)
+
+    for earlier, later in zip(cues, cues[1:], strict=False):
+        assert earlier.end == later.start
+    assert cues[-1].end == pytest.approx(11.0)
+
+
 def test_cues_from_timestamps_last_cue_reaches_chunk_duration():
     # The coverage guard accepts timestamps ending at 80% of the chunk's
     # audio duration; the residual must still be covered by the last cue,

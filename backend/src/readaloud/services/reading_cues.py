@@ -191,6 +191,19 @@ def _chunk_words(text: str) -> list[str]:
     return words
 
 
+def _clamp_start(start: float, duration: float) -> float:
+    """Clamp a word timestamp's start into its own chunk's window.
+
+    Kokoro can report a negative `start` for a chunk's first word. Left
+    unclamped, offsetting it by the chunk's own offset would place the cue
+    before the chunk starts, overlapping the previous chunk's last cue.
+    """
+    clamped = max(0.0, start)
+    if duration > 0:
+        clamped = min(clamped, duration)
+    return clamped
+
+
 def _cues_from_timestamps(
     text: str,
     timestamps: list[WordTimestamp],
@@ -223,7 +236,7 @@ def _cues_from_timestamps(
         return None
 
     cues = [
-        Cue(text=word, start=offset + ts.start, end=offset + ts.end)
+        Cue(text=word, start=offset + _clamp_start(ts.start, duration), end=offset + ts.end)
         for word, ts in zip(words, merged, strict=True)
     ]
     for index, cue in enumerate(cues[:-1]):
