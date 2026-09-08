@@ -44,6 +44,16 @@ async def test_generate_speech_retries_on_failure(client):
 
 
 @pytest.mark.asyncio
+async def test_generate_speech_raises_on_empty_audio(client):
+    empty_response = httpx.Response(200, content=b"", request=httpx.Request("POST", "http://test"))
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = empty_response
+        with pytest.raises(RuntimeError, match="empty audio"):
+            await client.generate_speech("Hello")
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_generate_speech_raises_after_max_retries(client):
     with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
         mock_post.side_effect = httpx.ConnectError("Connection refused")

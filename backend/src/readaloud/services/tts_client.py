@@ -66,6 +66,10 @@ class TtsClient:
             try:
                 response = await self._client.post(url, json=payload, headers=auth_headers())
                 response.raise_for_status()
+                if not response.content:
+                    raise RuntimeError(
+                        f"TTS server returned empty audio (status {response.status_code})"
+                    )
                 return response.content
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
