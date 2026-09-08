@@ -48,9 +48,37 @@ still gets approximate highlighting instead of none.
 ```
 
 Verified against the running container. Punctuation is tokenized
-separately from words. This is not part of the OpenAI-compatible contract
-the rest of the app targets — it 404s on any server that doesn't implement
-it (confirmed via Context7 docs for `/remsky/kokoro-fastapi`).
+separately from words. `return_timestamps` defaults to true but is sent
+explicitly, since the whole request depends on it. This is not part of the
+OpenAI-compatible contract the rest of the app targets — it 404s on any
+server that doesn't implement it (confirmed via Context7 docs for
+`/remsky/kokoro-fastapi`).
+
+### The timestamps describe the spoken audio, not the source text
+
+Two behaviors measured against the running container decide the design
+below. Both make the server's `word` strings unusable as display text.
+
+**Kokoro reports post-normalization words.** Its text normalizer rewrites
+the input before synthesis, and timestamps describe what it actually said:
+
+| input text | timestamp words |
+|---|---|
+| `Dr. Smith met Mr. Jones at 3 p.m.` | `Doctor`, `Smith`, `met`, `Mister`, `Jones`, `at`, `three`, `p-m.` |
+| `It costs $5.00 today, about 1,234 units.` | `It`, `costs`, `five`, `dollars`, `today`, `,`, `about`, `one`, `thousand`, … |
+| `Visit https://example.com or mail bob@example.com now.` | `Visit`, `https`, `example`, `dot`, `com`, `or`, … |
+| `He said "hello there" (quietly) to the crowd.` | punctuation split off, so merging yields `said"`, `there"(`, `quietly)` |
+
+Rendering those in the reading view would show the user words they never
+wrote — "five dollars" where their article says "$5.00" — and mangled
+tokens around quotes and parentheses.
+
+**Timestamps can silently stop short of the audio.** For
+`The plan - a good one - worked well.` the server returned 2.136s of audio
+but only six tokens ending at 1.091s: "worked well" is spoken with no
+timestamps covering it. Consuming that list unguarded freezes the highlight
+for the last half of the clip. Well-formed responses leave only a small
+trailing-silence gap (26-76ms measured), so the shortfall is detectable.
 
 ## Backend
 
@@ -70,16 +98,16 @@ behavior unchanged.
 Add:
 
 ```python
-@dataclass(frozen=True)
-class WordTimestamp:
-    word: str
-    start: float
-    end: float
-
 async def generate_speech_with_timestamps(
     self, text: str, voice: str | None, model: str | None, speed: float,
 ) -> tuple[bytes, list[WordTimestamp] | None]
 ```
+
+`WordTimestamp` (frozen dataclass: `word`, `start`, `end`) lives in
+`services/reading_cues.py`, not here — that module is pure logic with no
+HTTP dependency, and the client mapping a response into a domain type is
+the normal direction. Importing it the other way would drag `httpx` into
+the cue module's import graph and its tests.
 
 Behavior:
 - If a prior call on this instance already got a 404 from
@@ -94,10 +122,20 @@ Behavior:
 - On success, base64-decode `audio`, map `timestamps` entries to
   `WordTimestamp` (`start`/`end`, not the server's `start_time`/`end_time`
   names — kept short since this is an internal type, never serialized).
+- Empty decoded audio raises, matching the guard `generate_speech` already
+  has. A GPU-context failure inside Kokoro returns HTTP 200 with an empty
+  body rather than a 5xx (observed in production), so both synthesis paths
+  have to catch it or the job "succeeds" with silence.
 - Any other error (5xx after retries exhausted, network failure, malformed
   JSON) propagates as today's `generate_speech` does — it does not fall
   back silently, since that would hide a real synthesis failure behind a
   degraded-but-successful-looking response.
+
+The short-text path in `generate_tts` builds a fresh `TtsClient` per
+request, so against a non-Kokoro server every short generation pays one
+wasted 404 round-trip. Accepted: it's one extra local request against a
+server that's about to do far more expensive synthesis work, and a
+process-wide cache would need invalidating when `TTS_BASE_URL` changes.
 
 ### `services/reading_cues.py`
 
@@ -115,35 +153,66 @@ def compute_cues(
 All three lists are the same length and order as today's `chunk_texts`.
 For each chunk, offset accumulates exactly as before (`frame_duration_seconds`
 still determines cross-chunk offsets regardless of which path a chunk
-takes). Per chunk:
+takes).
 
-- **`chunk_timestamps[i]` is not `None`** (real timestamps, from a chunk
-  Kokoro just synthesized): build cues from them directly.
-  1. Merge punctuation-only tokens (`re.fullmatch(r"[^\w\s]+", token.word)`)
-     into the preceding word's cue: append the punctuation text and extend
-     the cue's `end` to the punctuation's `end_time`. A leading
-     punctuation-only token with no predecessor is kept standalone (rare,
-     harmless).
-  2. Attach the paragraph-break marker: split the chunk's original text on
-     `\n\n+` as today, count words per paragraph with `.split()`, and walk
-     the merged-cue list to find the ordinal boundary after each paragraph
-     but the last. If the merged-cue count doesn't match the total naive
-     word count (Kokoro's text normalizer can drop or alter words per its
-     own docs), skip attaching markers for this chunk — best-effort,
-     consistent with the existing "Make cue computation best-effort"
-     handling in `routes/tts.py`. A skipped marker means that one chunk's
-     paragraph break renders as a run-on in the reading view; it does not
-     affect timing or highlighting.
-- **`chunk_timestamps[i]` is `None`** (heuristic fallback — either the
-  server doesn't support captions, or this chunk's audio came from
-  `known_chunks`/client cache and was never synthesized this request):
-  run today's existing `_cues_for_chunk`/`_cues_for_sentence` character-count
-  split, unchanged.
+**Timestamps supply timing only. Cue text always comes from the user's own
+text.** Given the normalization and truncation behavior measured above,
+the server's `word` strings are used to *count and time* tokens, never to
+render them. This keeps the invariant the reading view depends on: what it
+displays is exactly the text that was submitted, whatever the TTS server
+did to it internally.
 
-This mixes real and heuristic cues within a single job when some chunks are
-cache hits and others are freshly synthesized — the per-chunk offset
-architecture already treats chunks independently, so this isn't new
+Per chunk, the real-timestamp path is:
+
+1. **Merge punctuation-only tokens** (`re.fullmatch(r"[^\w\s]+", word)`)
+   into the adjacent word's span: backward into the preceding token
+   normally (extending its `end`), forward into the following token when
+   there is no predecessor (extending its `start`). Forward-merging the
+   leading case matters — a paragraph opening on a quotation mark is
+   common in articles, and leaving that token standalone would fail the
+   alignment check below for the whole chunk.
+2. **Align by index against the chunk's own words.** Split the chunk text
+   the way the heuristic path already does — paragraphs on `\n\n+`, then
+   `.split()` — into a flat list of original word tokens, with `"\n\n"`
+   appended to each paragraph's last token exactly as today. Kokoro splits
+   punctuation off a word and step 1 puts it back, so a well-behaved
+   response has one merged token per original word.
+3. **Reject unusable timestamps**, falling back to the heuristic for this
+   chunk, when either:
+   - the merged token count differs from the original word count — the
+     normalizer rewrote something ("$5.00" → "five dollars") or dropped
+     it, so no index mapping is trustworthy; or
+   - the last timestamp ends before 80% of the chunk's real audio
+     duration — the truncation case, where a count match alone would not
+     save us and the highlight would freeze mid-chunk.
+4. Otherwise emit one cue per original word: text from the original token
+   (paragraph marker included), `start`/`end` from the merged timestamp,
+   offset by the chunk's start.
+
+`chunk_timestamps[i] is None` — the server doesn't support captions, or
+this chunk's audio came from `known_chunks`/client cache and was never
+synthesized this request — takes the same heuristic path as a rejection,
+running today's `_cues_for_chunk`/`_cues_for_sentence` character-count
+split unchanged.
+
+Two consequences worth stating plainly. A chunk containing a price, a URL,
+or an abbreviation Kokoro expands falls back to heuristic timing for that
+whole chunk — correct text with today's approximate timing, which is the
+right trade against showing words the user never wrote. And the paragraph
+marker needs no separate boundary-matching logic or best-effort skipping:
+it rides along on the original tokens, so it is either exactly right or
+the chunk fell back to the heuristic that already handles it.
+
+This mixes real and heuristic cues within a single job — the per-chunk
+offset architecture already treats chunks independently, so this isn't new
 complexity, just using the seam that's already there.
+
+Validated against the running container before writing the plan: a
+three-paragraph article containing quoted dialogue (one paragraph opening
+on a quotation mark) and a parenthetical produced 41 aligned cues, text
+identical to the input, paragraph markers on the right words, and coverage
+to 14.15s of 14.21s of audio. The `$5.00` and truncating-em-dash cases both
+rejected into the heuristic as intended.
 
 ### `routes/tts.py`
 
@@ -180,22 +249,29 @@ operate on `Cue.start`/`end`/`text` regardless of how those were computed.
 - 404 specifically means "this server doesn't implement captions," which is
   an expected, permanent condition for the life of the job — cached after
   the first occurrence to avoid a wasted round-trip per chunk.
-- Paragraph-marker misalignment within a chunk degrades to no marker for
-  that chunk, never a crash or job failure — matches the "best-effort" cue
-  handling already in place for the whole feature.
+- Timestamps that don't align with the chunk's words, or that stop short of
+  its audio, degrade that chunk to heuristic cues — never a crash or job
+  failure, matching the "best-effort" cue handling already in place for the
+  whole feature. The user sees today's approximate timing for that chunk,
+  which is strictly no worse than the current behavior.
+- Empty audio on the captioned path raises, exactly as on the plain path.
 
 ## Testing
 
 - `test_tts_client.py`: success path parses audio + timestamps correctly;
   404 falls back to `generate_speech` and marks the instance so the next
   call skips straight to it; a non-404 error still retries and then
-  propagates, matching `generate_speech`'s existing contract.
-- `test_reading_cues.py`: real-timestamp cues merge trailing punctuation
-  into the previous word; paragraph-break marker attaches correctly when
-  word counts align and is omitted (without raising) when they don't; a
-  chunk with `None` timestamps still produces the existing heuristic cues;
-  a job mixing one real-timestamp chunk and one heuristic chunk offsets
-  correctly across the boundary.
+  propagates, matching `generate_speech`'s existing contract; empty audio
+  raises.
+- `test_reading_cues.py`: trailing punctuation merges into the previous
+  word's span and a leading punctuation token merges into the next;
+  timing comes from the timestamps while text comes from the original
+  words (asserted with a normalization-style case where the two differ);
+  the paragraph-break marker rides on the original tokens; a count
+  mismatch and a truncated timestamp list each fall back to heuristic cues
+  rather than raising; a chunk with `None` timestamps still produces the
+  existing heuristic cues; a job mixing one real-timestamp chunk and one
+  heuristic chunk offsets correctly across the boundary.
 - `test_routes.py`: existing mocks of `TtsClient.generate_speech` update to
   `generate_speech_with_timestamps` (returning `(audio, None)` where the
   test doesn't care about timestamps, so heuristic cue assertions stay

@@ -37,7 +37,7 @@ pnpm preview                     # Preview production build
 - `main.py` — `create_app()` factory: CORS, route registration, static file serving, job-sweeper lifespan
 - `config.py` — Pydantic settings from env vars (`READALOUD_*` prefix)
 - `routes/` — HTTP handlers: `tts.py`, `extract.py`, `voices.py`, `health.py`, `settings.py`
-- `services/` — Business logic: `tts_client.py`, `text_extractor.py`, `text_chunker.py`, `audio_stitcher.py`, `job_store.py`, `url_guard.py`
+- `services/` — Business logic: `tts_client.py`, `text_extractor.py`, `pdf_extractor.py`, `text_chunker.py`, `audio_stitcher.py`, `mp3_frames.py`, `job_store.py`, `url_guard.py`
 - `models/schemas.py` — Pydantic request/response models
 
 ### Frontend (`frontend/src/`)
@@ -56,6 +56,10 @@ pnpm preview                     # Preview production build
 2. Frontend polls `/api/tts/status/{jobId}` until complete
 3. Audio served at `/api/tts/audio/{jobId}`
 4. Long texts are chunked (paragraph → sentence → word boundaries), processed sequentially, then MP3s are stitched together
+5. Callers may pass `known_chunks` (hash + base64 audio) on the request; the backend reuses those
+   instead of resynthesizing matching chunks. The extension's direct adapter pre-chunks locally and
+   supplies its `chunk-cache.js` cache as `known_chunks`. `TtsStatusResponse.chunks` reports each
+   chunk's `source` (`synthesized` vs `client_cache`).
 
 **URL extraction:**
 - POST `/api/extract` → trafilatura fetches and parses the URL, returns title + text (max 100k chars)
@@ -73,6 +77,10 @@ browser and under Vite/vitest.
   `POST /v1/audio/speech` directly. `index.js` picks one from `settings.ttsTarget`.
 - `lib/player.js` — plays the adapters' blob stream sequentially with one chunk of lookahead
 - `lib/chunker.js` — JS port of `text_chunker.py`, used only by the direct adapter
+- `lib/chunk-cache.js` — session-scoped LRU cache of synthesized chunk audio, keyed by (voice, hash)
+- `lib/hash.js` — SHA-256 hex digest matching the backend's chunk hashing, for cache lookups
+- `lib/read-from-here.js` — slices article text from a DOM selection onward for "read from here"
+- `lib/pdf.js` — detects PDF URLs and resolves Firefox's built-in PDF viewer URL to the real one
 - `lib/settings.js` — `storage.local` schema and defaults
 - `background.js` — orchestration only; owns state and the message API used by the popup
 

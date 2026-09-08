@@ -10,12 +10,20 @@ back to the heuristic per chunk when they aren't.
 which calls Kokoro's `/dev/captioned_speech` endpoint and falls back to the
 plain `/v1/audio/speech` call (returning `None` timestamps) on a 404.
 `reading_cues.compute_cues()` takes a third per-chunk argument
-(`chunk_timestamps`) and, per chunk, builds cues from real timestamps when
-present or the existing character-count heuristic when not — chunks are
-already independent in this module, so mixing both within one job is a
-natural extension, not new complexity. `routes/tts.py` threads timestamps
-from synthesis through to cue computation at both call sites (the immediate
-short-text path and the background long-text job).
+(`chunk_timestamps`) and, per chunk, times cues from real timestamps when
+they align with the chunk's own words, or falls back to the existing
+character-count heuristic — chunks are already independent in this module,
+so mixing both within one job is a natural extension, not new complexity.
+`routes/tts.py` threads timestamps from synthesis through to cue
+computation at both call sites (the immediate short-text path and the
+background long-text job).
+
+**Timestamps supply timing only; cue text always comes from the submitted
+text.** Kokoro reports post-normalization words ("$5.00" comes back as
+"five dollars", "Dr." as "Doctor") and can stop emitting timestamps before
+the audio ends, so its `word` strings are used to count and time tokens,
+never to render them. See the spec's "The timestamps describe the spoken
+audio, not the source text" for the measurements behind this.
 
 **Tech Stack:** Python 3.13, FastAPI, httpx, pytest, pytest-asyncio.
 
@@ -32,9 +40,11 @@ short-text path and the background long-text job).
   fall back silently. Any other error (5xx after retries, network failure,
   malformed JSON) propagates as a real failure — never silently downgrade a
   broken server response into "no timestamps."
-- Paragraph-break marker placement is best-effort: on a word-count mismatch
-  between our own paragraph split and the server's (merged) timestamps,
-  skip the marker for that chunk — never raise.
+- Real timestamps are used for a chunk only when they align with that
+  chunk's own words (one merged token per word) and cover at least 80% of
+  its audio duration. Otherwise that chunk silently falls back to the
+  character-count heuristic — never raise, and never render the server's
+  words.
 - Each task must leave all existing tests passing — `uv run pytest -q` from
   `backend/` after every task.
 
@@ -273,6 +283,17 @@ async def test_generate_speech_with_timestamps_retries_on_server_error(client):
 
 
 @pytest.mark.asyncio
+async def test_generate_speech_with_timestamps_raises_on_empty_audio(client):
+    body = json.dumps({"audio": "", "audio_format": "audio/mpeg", "timestamps": []}).encode()
+    mock_response = httpx.Response(200, content=body, request=httpx.Request("POST", "http://test"))
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        with pytest.raises(RuntimeError, match="empty audio"):
+            await client.generate_speech_with_timestamps("Hello")
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_generate_speech_with_timestamps_propagates_non_retryable_error(client):
     error_body = json.dumps({"error": {"message": "Invalid voice: bogus"}}).encode()
     error_response = httpx.Response(
@@ -395,6 +416,7 @@ from readaloud.services.reading_cues import WordTimestamp
             "speed": speed,
             "response_format": "mp3",
             "stream": False,
+            "return_timestamps": True,
         }
         response = await self._post_with_retry(url, payload, bypass_status_codes=frozenset({404}))
 
@@ -406,12 +428,20 @@ from readaloud.services.reading_cues import WordTimestamp
         self._captions_supported = True
         data = response.json()
         audio = base64.b64decode(data["audio"])
+        if not audio:
+            raise RuntimeError("TTS server returned empty audio with timestamps")
         timestamps = [
             WordTimestamp(word=item["word"], start=item["start_time"], end=item["end_time"])
             for item in data["timestamps"]
         ]
         return audio, timestamps
 ```
+
+`return_timestamps` defaults to true server-side, but the whole call is
+pointless without it, so it's explicit. The empty-audio check mirrors the
+one `generate_speech` already has: a failed GPU context inside Kokoro
+returns HTTP 200 with no audio rather than a 5xx, and without this the job
+completes "successfully" with silence.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -442,8 +472,10 @@ git commit -m "Add TtsClient.generate_speech_with_timestamps"
 - Consumes: `WordTimestamp` from Task 2.
 - Produces:
   - `_merge_punctuation(timestamps: list[WordTimestamp]) -> list[WordTimestamp]`
-  - `_cues_from_timestamps(text: str, timestamps: list[WordTimestamp], offset: float) -> list[Cue]`
-    — Task 4 wires this into `compute_cues`.
+  - `_chunk_words(text: str) -> list[str]`
+  - `_cues_from_timestamps(text: str, timestamps: list[WordTimestamp], offset: float, duration: float) -> list[Cue] | None`
+    — returns `None` when the timestamps can't be trusted for this chunk.
+    Task 4 wires this into `compute_cues` and handles the `None` fallback.
 
 These are new private functions alongside the existing heuristic path;
 `compute_cues`'s public signature doesn't change until Task 4, so these are
@@ -481,9 +513,16 @@ def test_merge_punctuation_folds_trailing_punctuation_into_previous_word():
     assert merged == [WordTimestamp(word="test.", start=1.0, end=1.8)]
 
 
-def test_merge_punctuation_keeps_leading_punctuation_standalone():
-    merged = _merge_punctuation([WordTimestamp(word="“", start=0.0, end=0.05)])
-    assert merged == [WordTimestamp(word="“", start=0.0, end=0.05)]
+def test_merge_punctuation_folds_leading_punctuation_into_next_word():
+    # A paragraph opening on a quotation mark is common; leaving the mark
+    # standalone would fail the alignment check for the whole chunk.
+    merged = _merge_punctuation(
+        [
+            WordTimestamp(word='"', start=0.0, end=0.05),
+            WordTimestamp(word="Hello", start=0.05, end=0.4),
+        ]
+    )
+    assert merged == [WordTimestamp(word='"Hello', start=0.0, end=0.4)]
 
 
 def test_merge_punctuation_leaves_plain_words_untouched():
@@ -504,8 +543,23 @@ def test_cues_from_timestamps_offsets_by_chunk_start():
         WordTimestamp(word="Hi", start=0.0, end=0.2),
         WordTimestamp(word="!", start=0.2, end=0.3),
     ]
-    cues = _cues_from_timestamps("Hi!", timestamps, offset=5.0)
+    cues = _cues_from_timestamps("Hi!", timestamps, offset=5.0, duration=0.3)
     assert [(c.text, c.start, c.end) for c in cues] == [("Hi!", 5.0, 5.3)]
+
+
+def test_cues_from_timestamps_uses_submitted_text_not_the_servers_words():
+    # Kokoro reports post-normalization words ("Dr." is spoken "Doctor").
+    # Timing comes from the server; the text stays what the user submitted.
+    timestamps = [
+        WordTimestamp(word="Doctor", start=0.0, end=0.5),
+        WordTimestamp(word="Smith", start=0.5, end=0.9),
+        WordTimestamp(word=".", start=0.9, end=1.0),
+    ]
+    cues = _cues_from_timestamps("Dr. Smith.", timestamps, offset=0.0, duration=1.0)
+    assert [(c.text, c.start, c.end) for c in cues] == [
+        ("Dr.", 0.0, 0.5),
+        ("Smith.", 0.5, 1.0),
+    ]
 
 
 def test_cues_from_timestamps_attaches_paragraph_break():
@@ -517,26 +571,36 @@ def test_cues_from_timestamps_attaches_paragraph_break():
         WordTimestamp(word="para", start=1.0, end=1.3),
         WordTimestamp(word=".", start=1.3, end=1.4),
     ]
-    cues = _cues_from_timestamps("First para.\n\nSecond para.", timestamps, offset=0.0)
+    cues = _cues_from_timestamps(
+        "First para.\n\nSecond para.", timestamps, offset=0.0, duration=1.4
+    )
     assert [c.text for c in cues] == ["First", "para.\n\n", "Second", "para."]
 
 
-def test_cues_from_timestamps_skips_paragraph_marker_on_word_count_mismatch():
-    # Simulates the server's text normalizer dropping a word: only 3 merged
-    # tokens come back for text that naively splits into 4 words.
+def test_cues_from_timestamps_rejects_word_count_mismatch():
+    # The normalizer expanded "$5" into two spoken words, so there is no
+    # trustworthy positional mapping back onto the submitted text.
     timestamps = [
-        WordTimestamp(word="First", start=0.0, end=0.3),
-        WordTimestamp(word="para", start=0.3, end=0.6),
-        WordTimestamp(word=".", start=0.6, end=0.7),
-        WordTimestamp(word="para", start=0.7, end=1.0),
-        WordTimestamp(word=".", start=1.0, end=1.1),
+        WordTimestamp(word="It", start=0.0, end=0.2),
+        WordTimestamp(word="costs", start=0.2, end=0.5),
+        WordTimestamp(word="five", start=0.5, end=0.8),
+        WordTimestamp(word="dollars", start=0.8, end=1.2),
     ]
-    cues = _cues_from_timestamps("First para.\n\nSecond para.", timestamps, offset=0.0)
-    assert all("\n\n" not in c.text for c in cues)
+    assert _cues_from_timestamps("It costs $5.", timestamps, offset=0.0, duration=1.2) is None
 
 
-def test_cues_from_timestamps_empty_timestamps_yields_no_cues():
-    assert _cues_from_timestamps("text", [], offset=0.0) == []
+def test_cues_from_timestamps_rejects_timestamps_that_stop_short_of_the_audio():
+    # Observed Kokoro behavior: it stops emitting timestamps mid-utterance
+    # while the audio keeps going, which would freeze the highlight.
+    timestamps = [
+        WordTimestamp(word="The", start=0.0, end=0.2),
+        WordTimestamp(word="plan", start=0.2, end=1.0),
+    ]
+    assert _cues_from_timestamps("The plan", timestamps, offset=0.0, duration=3.0) is None
+
+
+def test_cues_from_timestamps_empty_timestamps_falls_back():
+    assert _cues_from_timestamps("text", [], offset=0.0, duration=1.0) is None
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -551,64 +615,108 @@ Add to `backend/src/readaloud/services/reading_cues.py`, after the
 
 ```python
 _PUNCTUATION_ONLY = re.compile(r"[^\w\s]+")
+MIN_TIMESTAMP_COVERAGE = 0.8
 ```
 
 Add after `_cues_for_sentence` (end of file):
 
 ```python
 def _merge_punctuation(timestamps: list[WordTimestamp]) -> list[WordTimestamp]:
-    """Fold punctuation-only tokens into the preceding word.
+    """Fold punctuation-only tokens into the adjacent word's span.
 
-    Kokoro tokenizes punctuation separately from the word before it (e.g.
-    "test" then "."). A lone punctuation highlight isn't useful, so its text
-    and duration join the previous word's cue. A leading punctuation-only
-    token with no predecessor is kept standalone.
+    Kokoro tokenizes punctuation separately from the word beside it ("test"
+    then "."), while the source text attaches it ("test."). Folding it back
+    restores one token per source word, which is what `_cues_from_timestamps`
+    aligns on. Punctuation merges backward into the preceding word, or
+    forward into the following one when it opens the chunk -- a paragraph
+    starting on a quotation mark is common enough that leaving it standalone
+    would fail that alignment for the whole chunk.
     """
     merged: list[WordTimestamp] = []
+    leading: list[WordTimestamp] = []
     for ts in timestamps:
-        if merged and _PUNCTUATION_ONLY.fullmatch(ts.word):
+        is_punctuation = bool(_PUNCTUATION_ONLY.fullmatch(ts.word))
+        if is_punctuation and merged:
             previous = merged[-1]
             merged[-1] = WordTimestamp(
                 word=previous.word + ts.word, start=previous.start, end=ts.end
             )
+        elif is_punctuation:
+            leading.append(ts)
+        elif leading:
+            merged.append(
+                WordTimestamp(
+                    word="".join(t.word for t in leading) + ts.word,
+                    start=leading[0].start,
+                    end=ts.end,
+                )
+            )
+            leading.clear()
         else:
             merged.append(ts)
+
+    if leading:
+        merged.append(
+            WordTimestamp(
+                word="".join(t.word for t in leading),
+                start=leading[0].start,
+                end=leading[-1].end,
+            )
+        )
     return merged
 
 
-def _paragraph_boundary_indices(paragraph_word_counts: list[int], word_total: int) -> set[int]:
-    """Indices into a flat word list marking the last word of every paragraph but the last.
+def _chunk_words(text: str) -> list[str]:
+    """The chunk's own words in order, each paragraph's last word carrying "\\n\\n".
 
-    Returns an empty set if the paragraph word counts don't add up to
-    `word_total` -- the TTS server's text normalization can drop or alter
-    words, and a misaligned split is worse than none: best-effort, like the
-    rest of cue computation.
+    Same paragraph and word splitting the heuristic path uses, flattened.
+    The real-timestamp path pairs these with timestamps positionally, so cue
+    text is always the submitted text rather than the server's normalized
+    rendering of it.
     """
-    if len(paragraph_word_counts) < 2 or sum(paragraph_word_counts) != word_total:
-        return set()
+    paragraphs = [p for p in re.split(r"\n\n+", text) if p.strip()]
+    words: list[str] = []
+    for index, paragraph in enumerate(paragraphs):
+        paragraph_words = paragraph.split()
+        if not paragraph_words:
+            continue
+        if index < len(paragraphs) - 1:
+            paragraph_words[-1] += "\n\n"
+        words.extend(paragraph_words)
+    return words
 
-    boundaries: set[int] = set()
-    cumulative = 0
-    for count in paragraph_word_counts[:-1]:
-        cumulative += count
-        boundaries.add(cumulative - 1)
-    return boundaries
 
+def _cues_from_timestamps(
+    text: str,
+    timestamps: list[WordTimestamp],
+    offset: float,
+    duration: float,
+) -> list[Cue] | None:
+    """Build one chunk's cues from the TTS server's real per-word timestamps.
 
-def _cues_from_timestamps(text: str, timestamps: list[WordTimestamp], offset: float) -> list[Cue]:
-    """Build cues for one chunk from the TTS server's real per-word timestamps."""
+    Timestamps supply timing only -- cue text comes from `text`, so the
+    reading view always shows what was submitted.
+
+    Returns:
+        The chunk's cues, or None when the timestamps can't be trusted and
+        the caller should fall back to the character-count heuristic: a
+        token count that doesn't match the chunk's own words (the server's
+        normalizer rewrote something, e.g. "$5.00" -> "five dollars", so no
+        positional mapping holds), or timestamps ending well before the
+        audio does (the server stopped emitting them mid-utterance, which
+        would freeze the highlight for the rest of the chunk).
+    """
     merged = _merge_punctuation(timestamps)
-    if not merged:
-        return []
+    words = _chunk_words(text)
+    if not merged or len(merged) != len(words):
+        return None
+    if duration > 0 and merged[-1].end < duration * MIN_TIMESTAMP_COVERAGE:
+        return None
 
-    paragraph_word_counts = [len(p.split()) for p in re.split(r"\n\n+", text) if p.strip()]
-    boundary_indices = _paragraph_boundary_indices(paragraph_word_counts, len(merged))
-
-    cues: list[Cue] = []
-    for index, ts in enumerate(merged):
-        cue_text = ts.word + "\n\n" if index in boundary_indices else ts.word
-        cues.append(Cue(text=cue_text, start=offset + ts.start, end=offset + ts.end))
-    return cues
+    return [
+        Cue(text=word, start=offset + ts.start, end=offset + ts.end)
+        for word, ts in zip(words, merged, strict=True)
+    ]
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -774,6 +882,22 @@ def test_mixes_real_timestamps_and_heuristic_across_chunks():
     assert cues[1].end == pytest.approx(1.0)
     assert cues[2].start == pytest.approx(1.0)
     assert cues[-1].end == pytest.approx(3.0)
+
+
+def test_unusable_timestamps_fall_back_to_the_heuristic_for_that_chunk():
+    # Three tokens for two words: the normalizer expanded something, so this
+    # chunk gets heuristic timing rather than a bad alignment -- and keeps
+    # the submitted text either way.
+    normalized = [
+        WordTimestamp(word="five", start=0.0, end=0.4),
+        WordTimestamp(word="dollars", start=0.4, end=0.8),
+        WordTimestamp(word="today.", start=0.8, end=1.0),
+    ]
+    cues = compute_cues(["$5.00 today."], [1.0], [normalized])
+
+    assert [c.text for c in cues] == ["$5.00", "today."]
+    assert cues[0].start == pytest.approx(0.0)
+    assert cues[-1].end == pytest.approx(1.0)
 ```
 
 Leave the `test_merge_punctuation_*` and `test_cues_from_timestamps_*` tests
@@ -797,13 +921,16 @@ def compute_cues(
 ) -> list[Cue]:
     """Build word-level playback cues for a sequence of TTS chunks.
 
-    Each chunk uses real per-word timestamps from the TTS server when
-    available (`chunk_timestamps[i]` is not None). Otherwise its real audio
-    duration is split across its own words, proportional to character
-    length, since there's no per-word timing to fall back on. Chunks are
-    independent, so a job can mix both -- e.g. a chunk whose audio came from
-    the client's local cache was never sent to the TTS server this request
-    and has no timestamps.
+    Each chunk is timed by the TTS server's real per-word timestamps when it
+    has them and they line up with its words. Otherwise its real audio
+    duration is split across its own words proportional to character length.
+    Chunks are independent, so a job can mix both -- e.g. a chunk whose
+    audio came from the client's local cache was never sent to the TTS
+    server this request and has no timestamps at all.
+
+    Cue text always comes from `chunk_texts`, never from the timestamps:
+    the server reports the words it actually spoke, which its text
+    normalizer may have rewritten.
 
     Args:
         chunk_texts: Chunk text, in playback order -- the same list passed
@@ -831,10 +958,14 @@ def compute_cues(
     for text, duration, timestamps in zip(
         chunk_texts, chunk_durations, chunk_timestamps, strict=True
     ):
-        if timestamps is not None:
-            cues.extend(_cues_from_timestamps(text, timestamps, offset))
-        else:
-            cues.extend(_cues_for_chunk(text, duration, offset))
+        real_cues = (
+            _cues_from_timestamps(text, timestamps, offset, duration)
+            if timestamps is not None
+            else None
+        )
+        if real_cues is None:
+            real_cues = _cues_for_chunk(text, duration, offset)
+        cues.extend(real_cues)
         offset += duration
     return cues
 ```
@@ -1165,10 +1296,60 @@ to:
         )
 ```
 
+Finally, add this new test at the end of the file — the mixed path is the
+one combination no existing test covers, and it's the case where a wrong
+`timestamps_by_chunk` order would show up:
+
+```python
+async def test_mixed_cache_and_synthesis_times_only_the_synthesized_chunk(temp_job_store):
+    import hashlib
+
+    from readaloud.services.mp3_frames import frame_duration_seconds, real_audio_frames
+    from readaloud.services.reading_cues import WordTimestamp
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "mixed-cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+
+    audio = build_frame(bitrate_index=1, samplerate_index=0, mode=0) * 20  # ~0.52s
+    cached_text, synth_text = "Cached chunk.", "Fresh chunk."
+    cached_hash = hashlib.sha256(cached_text.encode("utf-8")).hexdigest()
+    timestamps = [
+        WordTimestamp(word="Fresh", start=0.05, end=0.30),
+        WordTimestamp(word="chunk", start=0.30, end=0.45),
+        WordTimestamp(word=".", start=0.45, end=0.50),
+    ]
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(audio, timestamps))
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id,
+            [cached_text, synth_text],
+            "af_heart",
+            "kokoro",
+            1.0,
+            {cached_hash: audio},
+        )
+
+    job = jobs[job_id]
+    assert mock_client.generate_speech_with_timestamps.await_count == 1
+    assert [c.source for c in job.chunks] == ["client_cache", "synthesized"]
+    assert [c.text for c in job.cues] == ["Cached", "chunk.", "Fresh", "chunk."]
+
+    offset = frame_duration_seconds(real_audio_frames(audio))
+    assert job.cues[2].start == pytest.approx(offset + 0.05)
+    assert job.cues[3].end == pytest.approx(offset + 0.50)
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/test_routes.py -v`
-Expected: The 9 tests above FAIL (route still calls the old method name).
+Expected: The 9 updated tests and the new mixed-path test FAIL (the route
+still calls the old method name).
 
 - [ ] **Step 3: Implement**
 
@@ -1288,9 +1469,18 @@ Expected: All checks passed.
 
 With the GPU Kokoro container running (`docker compose ps` shows
 `kokoro-gpu` healthy), start the backend dev server and generate speech for
-a multi-paragraph piece of text in the web app. Confirm in the browser that
-word-by-word highlighting now tracks the audio noticeably tighter than
-before, including across a paragraph break.
+a multi-paragraph piece of text in the web app. Confirm in the browser:
+
+- Word-by-word highlighting tracks the audio noticeably tighter than
+  before, including across a paragraph break.
+- The reading view shows exactly the text that was submitted. Include a
+  price, an abbreviation, and a URL (e.g. "Dr. Smith paid $5.00 at
+  https://example.com") and confirm none of them render as the spoken
+  expansion ("Doctor", "five dollars", "example dot com"). That text sits
+  in a chunk that falls back to heuristic timing, which is expected —
+  correct words, approximate timing.
+- Highlighting reaches the last word of every chunk rather than freezing
+  partway, which is what the coverage guard protects against.
 
 - [ ] **Step 8: Commit**
 
