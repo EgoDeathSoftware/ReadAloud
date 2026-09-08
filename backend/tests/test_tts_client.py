@@ -247,6 +247,20 @@ async def test_generate_speech_with_timestamps_raises_on_empty_audio(client):
 
 
 @pytest.mark.asyncio
+async def test_generate_speech_with_timestamps_raises_on_malformed_response(client):
+    # Observed in production: a Kokoro GPU-context failure returns HTTP 200
+    # with an empty body. response.json() would raise json.JSONDecodeError
+    # before the empty-audio check is reached; this must surface as a clear
+    # RuntimeError instead of that raw parse error.
+    mock_response = httpx.Response(200, content=b"", request=httpx.Request("POST", "http://test"))
+    with patch.object(client._client, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        with pytest.raises(RuntimeError, match="Malformed captioned-speech response"):
+            await client.generate_speech_with_timestamps("Hello")
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_generate_speech_with_timestamps_propagates_non_retryable_error(client):
     error_body = json.dumps({"error": {"message": "Invalid voice: bogus"}}).encode()
     error_response = httpx.Response(

@@ -1,7 +1,10 @@
-"""Sentence-level timing cues for synced reading highlights.
+"""Word-level timing cues for synced reading highlights.
 
-Cue times live in the stitched audio's own timeline, so they are
-unaffected by playback-rate changes the frontend applies at playback time.
+Each chunk is timed by the TTS server's real per-word timestamps when they
+can be trusted, or by splitting its audio duration across its words
+proportional to character length otherwise. Cue times live in the stitched
+audio's own timeline, so they are unaffected by playback-rate changes the
+frontend applies at playback time.
 """
 
 import re
@@ -182,8 +185,6 @@ def _chunk_words(text: str) -> list[str]:
     words: list[str] = []
     for index, paragraph in enumerate(paragraphs):
         paragraph_words = paragraph.split()
-        if not paragraph_words:
-            continue
         if index < len(paragraphs) - 1:
             paragraph_words[-1] += "\n\n"
         words.extend(paragraph_words)
@@ -199,7 +200,11 @@ def _cues_from_timestamps(
     """Build one chunk's cues from the TTS server's real per-word timestamps.
 
     Timestamps supply timing only -- cue text comes from `text`, so the
-    reading view always shows what was submitted.
+    reading view always shows what was submitted. Kokoro's per-word spans
+    can leave small gaps between words and fall short of the chunk's actual
+    audio duration, so each cue's end is snapped to the next cue's start,
+    and the last cue's end is snapped to `offset + duration` -- matching the
+    heuristic path's contiguity and full-duration coverage.
 
     Returns:
         The chunk's cues, or None when the timestamps can't be trusted and
@@ -217,7 +222,12 @@ def _cues_from_timestamps(
     if duration > 0 and merged[-1].end < duration * MIN_TIMESTAMP_COVERAGE:
         return None
 
-    return [
+    cues = [
         Cue(text=word, start=offset + ts.start, end=offset + ts.end)
         for word, ts in zip(words, merged, strict=True)
     ]
+    for index, cue in enumerate(cues[:-1]):
+        cues[index] = Cue(text=cue.text, start=cue.start, end=cues[index + 1].start)
+    if duration > 0:
+        cues[-1] = Cue(text=cues[-1].text, start=cues[-1].start, end=offset + duration)
+    return cues

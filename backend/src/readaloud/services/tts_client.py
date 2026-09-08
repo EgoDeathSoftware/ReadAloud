@@ -150,14 +150,19 @@ class TtsClient:
             return audio, None
 
         self._captions_supported = True
-        data = response.json()
-        audio = base64.b64decode(data["audio"])
+        try:
+            data = response.json()
+            audio = base64.b64decode(data["audio"])
+            timestamps = [
+                WordTimestamp(word=item["word"], start=item["start_time"], end=item["end_time"])
+                for item in data["timestamps"]
+            ]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise RuntimeError(
+                f"Malformed captioned-speech response from TTS server: {exc}"
+            ) from exc
         if not audio:
             raise RuntimeError("TTS server returned empty audio with timestamps")
-        timestamps = [
-            WordTimestamp(word=item["word"], start=item["start_time"], end=item["end_time"])
-            for item in data["timestamps"]
-        ]
         return audio, timestamps
 
     async def close(self) -> None:

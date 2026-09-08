@@ -235,3 +235,30 @@ def test_cues_from_timestamps_rejects_timestamps_that_stop_short_of_the_audio():
 
 def test_cues_from_timestamps_empty_timestamps_falls_back():
     assert _cues_from_timestamps("text", [], offset=0.0, duration=1.0) is None
+
+
+def test_cues_from_timestamps_are_contiguous():
+    # Kokoro leaves small gaps between words; an accepted chunk's cues must
+    # still tile the chunk with no holes, same as the heuristic path.
+    timestamps = [
+        WordTimestamp(word="One", start=0.0, end=0.2),
+        WordTimestamp(word="two", start=0.25, end=0.45),
+        WordTimestamp(word="three.", start=0.5, end=0.85),
+    ]
+    cues = _cues_from_timestamps("One two three.", timestamps, offset=0.0, duration=1.0)
+
+    for earlier, later in zip(cues, cues[1:], strict=False):
+        assert earlier.end == later.start
+
+
+def test_cues_from_timestamps_last_cue_reaches_chunk_duration():
+    # The coverage guard accepts timestamps ending at 80% of the chunk's
+    # audio duration; the residual must still be covered by the last cue,
+    # not left blank.
+    timestamps = [
+        WordTimestamp(word="One", start=0.0, end=0.4),
+        WordTimestamp(word="two.", start=0.4, end=0.8),
+    ]
+    cues = _cues_from_timestamps("One two.", timestamps, offset=5.0, duration=1.0)
+
+    assert cues[-1].end == pytest.approx(6.0)

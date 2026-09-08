@@ -562,4 +562,8 @@ async def test_mixed_cache_and_synthesis_times_only_the_synthesized_chunk(temp_j
 
     offset = frame_duration_seconds(real_audio_frames(audio))
     assert job.cues[2].start == pytest.approx(offset + 0.05)
-    assert job.cues[3].end == pytest.approx(offset + 0.50)
+    # The synthesized chunk's timestamps stop at 0.50s, short of its own
+    # ~0.52s audio duration (same buffer as the cached chunk, hence 2 *
+    # offset); the last cue must reach the chunk's real duration rather
+    # than leave the residual uncovered (I-1).
+    assert job.cues[3].end == pytest.approx(2 * offset)
