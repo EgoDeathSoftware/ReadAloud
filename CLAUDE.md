@@ -94,7 +94,6 @@ browser and under Vite/vitest.
 - `lib/chunker.js` — JS port of `text_chunker.py`, used only by the direct adapter
 - `lib/chunk-cache.js` — session-scoped LRU cache of synthesized chunk audio, keyed by (voice, hash)
 - `lib/hash.js` — SHA-256 hex digest matching the backend's chunk hashing, for cache lookups
-- `lib/read-from-here.js` — slices article text from a DOM selection onward for "read from here"
 - `lib/pdf.js` — detects PDF URLs and resolves Firefox's built-in PDF viewer URL to the real one
 - `lib/settings.js` — `storage.local` schema and defaults
 - `content-reader.js` — injected extractor: stamps the live DOM, runs Readability on a
@@ -105,7 +104,7 @@ browser and under Vite/vitest.
 - `lib/audio-duration.js` — measures a chunk blob's duration for the cue heuristic
 - `background.js` — orchestration only; owns state and the message API used by the popup
 
-Both adapters expose `synthesize()` as an async generator yielding `{audio, index, total}`, so the
+Both adapters expose `synthesize()` as an async generator yielding `{audio, index, total, cues}`, so the
 player is target-agnostic. Tests: `cd extension && npm test` (vitest).
 
 ### TTS Server Integration
