@@ -74,6 +74,13 @@ pnpm preview                     # Preview production build
   proportional to character length. Cue text always comes from the submitted text, never the
   server's (possibly normalized) words. Returned as `cues` on both the short-text response and the
   job status response, consumed by `ReadingText` to highlight the word at the current playback time.
+- `ChunkStatus.cues` carries each chunk's cues, chunk-relative, as soon as that chunk is
+  synthesized — the extension plays chunks individually and needs timings before the job
+  finishes. `TtsStatusResponse.cues` remains the stitched-timeline list the web frontend uses.
+- In the extension, `content-reader.js` indexes article words to live DOM ranges, the
+  background page polls the player every 100 ms and messages the tab, and the tab paints one
+  word via the CSS Custom Highlight API. Highlighting covers "Read Page" and "Read From
+  Here"; selections and PDFs play with audio only.
 
 ### Extension (`extension/`)
 
@@ -90,6 +97,12 @@ browser and under Vite/vitest.
 - `lib/read-from-here.js` — slices article text from a DOM selection onward for "read from here"
 - `lib/pdf.js` — detects PDF URLs and resolves Firefox's built-in PDF viewer URL to the real one
 - `lib/settings.js` — `storage.local` schema and defaults
+- `content-reader.js` — injected extractor: stamps the live DOM, runs Readability on a
+  clone, and walks the live text nodes that survived, producing both the text to
+  synthesize and a word index of live DOM ranges. Also owns the in-page highlight.
+- `lib/reading-cues.js` — JS port of `reading_cues.py` for one chunk, used by the direct
+  adapter; `lib/cues.js` finds the cue covering a playback time
+- `lib/audio-duration.js` — measures a chunk blob's duration for the cue heuristic
 - `background.js` — orchestration only; owns state and the message API used by the popup
 
 Both adapters expose `synthesize()` as an async generator yielding `{audio, index, total}`, so the
@@ -99,10 +112,10 @@ player is target-agnostic. Tests: `cd extension && npm test` (vitest).
 
 Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:8880`. Endpoint: `POST /v1/audio/speech` with `{model, input, voice, speed, response_format: "mp3"}`.
 
-For reading-highlight cues, the backend also probes Kokoro-FastAPI's non-OpenAI
-`POST /dev/captioned_speech` for real per-word timestamps. A 404 means the configured server
-doesn't implement it; the backend silently falls back to the character-count heuristic for that
-job, so a non-Kokoro server still gets approximate highlighting.
+For reading-highlight cues, both the backend and the extension's direct adapter probe Kokoro-FastAPI's
+non-OpenAI `POST /dev/captioned_speech` for real per-word timestamps. A 404 means the configured server
+doesn't implement it; both silently fall back to the character-count heuristic, so a non-Kokoro server
+still gets approximate highlighting.
 
 ### Configuration (env vars, all optional)
 
