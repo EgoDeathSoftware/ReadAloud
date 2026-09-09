@@ -1,6 +1,8 @@
 import { chunkCache } from "/lib/chunk-cache.js";
 import { chunkText } from "/lib/chunker.js";
 import { sha256Hex } from "/lib/hash.js";
+import { measureDuration } from "/lib/audio-duration.js";
+import { cuesForChunk } from "/lib/reading-cues.js";
 
 /**
  * OpenAI's hard `input` cap is 4096 characters. 4000 leaves headroom and
@@ -10,6 +12,14 @@ import { sha256Hex } from "/lib/hash.js";
  */
 const MAX_INPUT_CHARS = 4000;
 const MAX_ATTEMPTS = 3;
+
+/**
+ * Whether this server implements Kokoro-FastAPI's non-OpenAI
+ * /dev/captioned_speech. A 404 flips it off for the rest of the session, so
+ * later chunks skip a request that will only fail again. Mirrors
+ * TtsClient._captions_supported in the backend.
+ */
+let captionsSupported = true;
 
 /**
  * OpenAI publishes no endpoint for enumerating voices, so this is the
@@ -122,22 +132,88 @@ export const openaiAdapter = {
     for (let index = 0; index < total; index++) {
       const hash = await sha256Hex(chunks[index]);
       const cached = chunkCache.get(voice, hash);
-      let audio = cached ? cached.blob : null;
-      if (!audio) {
-        audio = await requestChunk(chunks[index], voice, settings, signal);
-        chunkCache.set(voice, hash, audio);
+      let audio;
+      let cues;
+      if (cached) {
+        ({ blob: audio, cues } = cached);
+      } else {
+        const result = await requestChunk(chunks[index], voice, settings, signal);
+        audio = result.audio;
+        cues = cuesForChunk(
+          chunks[index],
+          result.timestamps ? result.duration : await measureDuration(audio),
+          result.timestamps,
+        );
+        chunkCache.set(voice, hash, audio, cues);
       }
       onProgress({
         chunksCompleted: index + 1,
         chunksTotal: total,
         progress: (index + 1) / total,
       });
-      yield { audio, index, total };
+      yield { audio, index, total, cues };
     }
   },
 };
 
+/**
+ * Synthesize one chunk, preferring Kokoro's /dev/captioned_speech so the cues
+ * get real per-word timings. Returns the audio plus timestamps and a duration
+ * derived from them, or timestamps: null when the server has no such endpoint.
+ */
 async function requestChunk(input, voice, settings, signal) {
+  if (captionsSupported) {
+    const captioned = await requestCaptioned(input, voice, settings, signal);
+    if (captioned) return captioned;
+  }
+  const audio = await requestSpeech(input, voice, settings, signal);
+  return { audio, timestamps: null, duration: 0 };
+}
+
+async function requestCaptioned(input, voice, settings, signal) {
+  const response = await fetch(`${settings.directUrl}/dev/captioned_speech`, {
+    method: "POST",
+    headers: headers(settings, { "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      model: settings.directModel || "kokoro",
+      input,
+      voice,
+      response_format: "mp3",
+      stream: false,
+      return_timestamps: true,
+    }),
+    signal,
+  });
+
+  if (response.status === 404) {
+    captionsSupported = false;
+    return null;
+  }
+  if (!response.ok) throw new Error(await describeError(response));
+
+  const data = await response.json();
+  const timestamps = (data.timestamps || []).map((item) => ({
+    word: item.word,
+    start: item.start_time,
+    end: item.end_time,
+  }));
+  if (!timestamps.length) return null;
+
+  return {
+    audio: base64ToBlob(data.audio),
+    timestamps,
+    duration: timestamps[timestamps.length - 1].end,
+  };
+}
+
+function base64ToBlob(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "audio/mpeg" });
+}
+
+async function requestSpeech(input, voice, settings, signal) {
   const url = `${settings.directUrl}/v1/audio/speech`;
   const body = JSON.stringify({
     model: settings.directModel || "kokoro",
