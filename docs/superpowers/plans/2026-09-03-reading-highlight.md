@@ -1093,12 +1093,12 @@ No automated frontend tests exist for this feature (see Global Constraints) — 
 
 - [ ] **Step 1: Start both servers**
 
-Run in one terminal: `cd backend && uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8000`
+Run in one terminal: `cd backend && uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8055`
 Run in another: `cd frontend && pnpm dev`
 
 - [ ] **Step 2: Verify short-text playback highlighting**
 
-Open `http://localhost:5173`. Paste a short multi-sentence text (under 4000 characters, e.g. 3-4 sentences). Click Generate, then Play. Confirm:
+Open `http://localhost:8056`. Paste a short multi-sentence text (under 4000 characters, e.g. 3-4 sentences). Click Generate, then Play. Confirm:
 - The textarea is replaced by a read-only view once playback starts.
 - The current sentence is highlighted and the highlight advances roughly in sync with the audio.
 - Pausing (native audio controls) or hitting the stop button reverts to the editable textarea.

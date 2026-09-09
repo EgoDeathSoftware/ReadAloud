@@ -677,12 +677,12 @@ describe("loadSettings", () => {
   });
 
   it("migrates the legacy serverUrl key to backendUrl", async () => {
-    const read = mockStorage({ serverUrl: "http://192.168.1.5:8000" });
+    const read = mockStorage({ serverUrl: "http://192.168.1.5:8055" });
     const settings = await loadSettings();
-    expect(settings.backendUrl).toBe("http://192.168.1.5:8000");
+    expect(settings.backendUrl).toBe("http://192.168.1.5:8055");
     expect(settings.ttsTarget).toBe("backend");
     expect(read().serverUrl).toBeUndefined();
-    expect(read().backendUrl).toBe("http://192.168.1.5:8000");
+    expect(read().backendUrl).toBe("http://192.168.1.5:8055");
   });
 
   it("does not clobber an existing backendUrl during migration", async () => {
@@ -692,9 +692,9 @@ describe("loadSettings", () => {
   });
 
   it("strips trailing slashes from both URLs", async () => {
-    mockStorage({ backendUrl: "http://a.test:8000//", directUrl: "http://b.test:8880/" });
+    mockStorage({ backendUrl: "http://a.test:8055//", directUrl: "http://b.test:8880/" });
     const settings = await loadSettings();
-    expect(settings.backendUrl).toBe("http://a.test:8000");
+    expect(settings.backendUrl).toBe("http://a.test:8055");
     expect(settings.directUrl).toBe("http://b.test:8880");
   });
 
@@ -732,7 +732,7 @@ export const TARGET_DIRECT = "direct";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   ttsTarget: TARGET_BACKEND,
-  backendUrl: "http://localhost:8000",
+  backendUrl: "http://localhost:8055",
   directUrl: "http://localhost:8880",
   directApiKey: "",
   directModel: "kokoro",
@@ -1217,7 +1217,7 @@ import { backendAdapter } from "./backend.js";
 import { pickAdapter } from "./index.js";
 import { openaiAdapter } from "./openai.js";
 
-const settings = { backendUrl: "http://localhost:8000" };
+const settings = { backendUrl: "http://localhost:8055" };
 
 function jsonResponse(body, status = 200) {
   return { ok: status < 400, status, json: async () => body, text: async () => "" };
@@ -1278,7 +1278,7 @@ describe("synthesize", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ index: 0, total: 1 });
     expect(globalThis.fetch.mock.calls.at(-1)[0]).toBe(
-      "http://localhost:8000/api/tts/audio/j1",
+      "http://localhost:8055/api/tts/audio/j1",
     );
   });
 
@@ -1303,8 +1303,8 @@ describe("synthesize", () => {
 
     const results = await run();
     expect(results.map((r) => r.index)).toEqual([0, 1]);
-    expect(fetched).toContain("http://localhost:8000/api/tts/audio/j2/0");
-    expect(fetched).toContain("http://localhost:8000/api/tts/audio/j2/1");
+    expect(fetched).toContain("http://localhost:8055/api/tts/audio/j2/0");
+    expect(fetched).toContain("http://localhost:8055/api/tts/audio/j2/1");
   });
 
   it("throws with the job error when the job fails", async () => {
@@ -1992,7 +1992,7 @@ The old `polling` phase disappears — progress now arrives through `onProgress`
 docker compose --profile local-cpu up -d
 ```
 
-Load the extension in `about:debugging`. In options, leave the target on **ReadAloud backend** with `http://localhost:8000`. Open a long article, right-click → ReadAloud: Read Page.
+Load the extension in `about:debugging`. In options, leave the target on **ReadAloud backend** with `http://localhost:8055`. Open a long article, right-click → ReadAloud: Read Page.
 
 Expected: audio starts after the first chunk (not after the whole article), the progress bar advances, Pause/Resume/Stop all work.
 
@@ -2000,7 +2000,7 @@ Expected: audio starts after the first chunk (not after the whole article), the 
 
 In options, switch the target to **Direct endpoint** with `http://localhost:8880`, no API key, model `kokoro`. Repeat the read.
 
-Expected: identical behaviour. Confirm in the Network panel of the background page that requests go to `localhost:8880/v1/audio/speech` and never to `:8000`.
+Expected: identical behaviour. Confirm in the Network panel of the background page that requests go to `localhost:8880/v1/audio/speech` and never to `:8055`.
 
 - [ ] **Step 4: Commit**
 
@@ -2040,7 +2040,7 @@ In `extension/options/options.html`, replace the single Server URL field (lines 
 
     <div class="field" id="backend-fields">
       <label for="backend-url">Backend URL</label>
-      <input type="url" id="backend-url" placeholder="http://localhost:8000">
+      <input type="url" id="backend-url" placeholder="http://localhost:8055">
     </div>
 
     <div class="field hidden" id="direct-fields">
@@ -2204,10 +2204,10 @@ In the browser console for the extension, seed the old key and reload the option
 
 ```js
 await browser.storage.local.clear();
-await browser.storage.local.set({ serverUrl: "http://192.168.1.5:8000" });
+await browser.storage.local.set({ serverUrl: "http://192.168.1.5:8055" });
 ```
 
-Expected: after reload, the target is **ReadAloud backend**, Backend URL shows `http://192.168.1.5:8000`, and `browser.storage.local.get("serverUrl")` returns `{}`.
+Expected: after reload, the target is **ReadAloud backend**, Backend URL shows `http://192.168.1.5:8055`, and `browser.storage.local.get("serverUrl")` returns `{}`.
 
 - [ ] **Step 6: Run the full test suite and commit**
 
@@ -2268,7 +2268,7 @@ Add to `README.md` after the Configuration table (and add the `READALOUD_TTS_API
 The Firefox extension can send TTS work to either of two places, selected in its options page.
 
 **ReadAloud backend** (default) — the extension talks to the FastAPI container at
-`http://localhost:8000`. The backend chunks long text, calls the TTS server, and the extension
+`http://localhost:8055`. The backend chunks long text, calls the TTS server, and the extension
 streams each finished chunk. Use this when you want the API key held server-side, or when the
 TTS server is not reachable from the browser.
 
@@ -2295,7 +2295,7 @@ In `CLAUDE.md`, add `READALOUD_TTS_API_KEY` (default blank) to the configuration
 docker compose down
 docker compose --profile local-cpu up -d
 curl -sf http://localhost:8880/health
-curl -sf http://localhost:8000/api/health
+curl -sf http://localhost:8055/api/health
 ```
 
 Expected: both return successfully. Then reload the extension and read a page in each target mode.

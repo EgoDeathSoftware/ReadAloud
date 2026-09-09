@@ -16,7 +16,7 @@ A web application that converts text and web content to spoken audio using an Op
 
 ## Docker (recommended)
 
-All modes build the app and serve it at `http://localhost:8000`.
+All modes build the app and serve it at `http://localhost:8055`.
 
 ### Remote TTS
 
@@ -51,7 +51,7 @@ Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+, and [pnpm]
 ```bash
 cd backend
 uv sync
-uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8055
 ```
 
 ### Frontend (development)
@@ -62,13 +62,13 @@ pnpm install
 pnpm dev
 ```
 
-The dev server runs at `http://localhost:5173` and proxies `/api` requests to the backend at `:8000`.
+The dev server runs at `http://localhost:8056` and proxies `/api` requests to the backend at `:8055`.
 
 ### Production build
 
 ```bash
 cd frontend && pnpm build
-cd ../backend && uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8000
+cd ../backend && uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8055
 ```
 
 The backend serves the compiled frontend from `frontend/dist/`.
@@ -92,7 +92,7 @@ Frontend settings (voice, speed, server URL) are configurable in the Settings pa
 The Firefox extension can send TTS work to either of two places, selected in its options page.
 
 **ReadAloud backend** (default) — the extension talks to the FastAPI container at
-`http://localhost:8000`. The backend chunks long text, calls the TTS server, and the extension
+`http://localhost:8055`. The backend chunks long text, calls the TTS server, and the extension
 streams each finished chunk. Use this when you want the API key held server-side, or when the
 TTS server is not reachable from the browser.
 

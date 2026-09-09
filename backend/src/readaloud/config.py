@@ -15,17 +15,19 @@ class Settings(BaseSettings):
     # DEFAULT_ALLOWED_ORIGINS. Declared as a string rather than list[str] because
     # pydantic-settings would otherwise expect JSON in the environment variable.
     ALLOWED_ORIGINS: str = ""
+    # Backend server port
+    PORT: int = 8055
 
 
 settings = Settings()
 
 DEFAULT_ALLOWED_ORIGINS = [
     # Vite dev server
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://localhost:8056",
+    "http://127.0.0.1:8056",
     # Backend serving frontend/dist in production
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
+    "http://localhost:8055",
+    "http://127.0.0.1:8055",
 ]
 
 # The WebExtension calls the API from its own origin. MV2 host permissions already

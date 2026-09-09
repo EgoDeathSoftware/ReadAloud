@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cd backend
 uv sync                          # Install dependencies
-uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8000  # Run dev server
+uv run uvicorn readaloud.main:app --host 0.0.0.0 --port 8055  # Run dev server
 uv run pytest tests/             # Run all tests
 uv run pytest tests/test_text_chunker.py  # Run single test file
 uv run ruff check src/           # Lint
@@ -25,7 +25,7 @@ uv run ruff format src/          # Format
 ```bash
 cd frontend
 pnpm install                     # Install dependencies
-pnpm dev                         # Dev server at http://localhost:5173 (proxies /api → :8000)
+pnpm dev                         # Dev server at http://localhost:8056 (proxies /api → :8055)
 pnpm build                       # TypeScript check + build to dist/
 pnpm preview                     # Preview production build
 ```
