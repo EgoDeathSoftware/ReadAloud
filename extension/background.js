@@ -73,8 +73,8 @@ async function buildKnownChunks(text, voice, settings, signal) {
     const knownChunks = [];
     for (const chunk of chunkText(text, maxChunkChars)) {
       const hash = await sha256Hex(chunk);
-      const blob = chunkCache.get(voice, hash);
-      if (blob) knownChunks.push({ hash, audioB64: await blobToBase64(blob) });
+      const entry = chunkCache.get(voice, hash);
+      if (entry) knownChunks.push({ hash, audioB64: await blobToBase64(entry.blob) });
     }
     return knownChunks;
   } catch {

@@ -99,7 +99,7 @@ export const backendAdapter = {
         const cached = info ? chunkCache.get(voice, info.hash) : null;
         let audio;
         if (info?.source === "client_cache" && cached) {
-          audio = cached;
+          audio = cached.blob;
         } else {
           audio = await fetchAudio(settings, `/api/tts/audio/${job.job_id}/${nextChunk}`, signal);
           if (info) chunkCache.set(voice, info.hash, audio);

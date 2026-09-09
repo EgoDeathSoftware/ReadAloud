@@ -1,8 +1,11 @@
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
 
 /**
- * Session-scoped LRU cache of synthesized chunk audio, keyed by (voice, chunk
- * hash). Lives only as long as the background page does -- no persistence.
+ * Session-scoped LRU cache of synthesized chunk audio and its word cues,
+ * keyed by (voice, chunk hash). Cues travel with the audio so a cache hit
+ * keeps the server's real word timings instead of falling back to the
+ * character-count heuristic on replay. Lives only as long as the background
+ * page does -- no persistence.
  */
 export function createChunkCache({ maxBytes = DEFAULT_MAX_BYTES } = {}) {
   const store = new Map();
@@ -27,10 +30,10 @@ export function createChunkCache({ maxBytes = DEFAULT_MAX_BYTES } = {}) {
       if (!entry) return null;
       store.delete(k);
       store.set(k, entry);
-      return entry.blob;
+      return { blob: entry.blob, cues: entry.cues };
     },
 
-    set(voice, hash, blob) {
+    set(voice, hash, blob, cues = []) {
       const k = key(voice, hash);
       const existing = store.get(k);
       if (existing) {
@@ -38,7 +41,7 @@ export function createChunkCache({ maxBytes = DEFAULT_MAX_BYTES } = {}) {
         store.delete(k);
       }
       evict(blob.size);
-      store.set(k, { blob, bytes: blob.size });
+      store.set(k, { blob, cues, bytes: blob.size });
       totalBytes += blob.size;
     },
 

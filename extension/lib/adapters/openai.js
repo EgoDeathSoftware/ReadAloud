@@ -121,7 +121,8 @@ export const openaiAdapter = {
 
     for (let index = 0; index < total; index++) {
       const hash = await sha256Hex(chunks[index]);
-      let audio = chunkCache.get(voice, hash);
+      const cached = chunkCache.get(voice, hash);
+      let audio = cached ? cached.blob : null;
       if (!audio) {
         audio = await requestChunk(chunks[index], voice, settings, signal);
         chunkCache.set(voice, hash, audio);
