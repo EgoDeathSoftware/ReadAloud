@@ -62,16 +62,25 @@ function stopHighlighting() {
   highlight.activeIndex = null;
 }
 
-/** Record a chunk's cues as it is yielded, and check they still line up. */
-function recordChunkCues({ index, cues }) {
+/**
+ * Record a chunk's cues as it is yielded, and check they still line up.
+ * `total` is the adapter's chunk count for the whole read; on the last chunk
+ * the cumulative cue count must exactly match `wordCount` -- an undercount
+ * would otherwise desync every highlight position for the rest of the read.
+ */
+function recordChunkCues({ index, total, cues }) {
   highlight.cueChunks[index] = cues || [];
   highlight.chunkOffsets[index] =
     index === 0
       ? 0
       : (highlight.chunkOffsets[index - 1] || 0) + (highlight.cueChunks[index - 1]?.length || 0);
 
-  const total = highlight.chunkOffsets[index] + highlight.cueChunks[index].length;
-  if (highlight.cueChunks[index].length === 0 || total > highlight.wordCount) {
+  const cumulative = highlight.chunkOffsets[index] + highlight.cueChunks[index].length;
+  if (highlight.cueChunks[index].length === 0 || cumulative > highlight.wordCount) {
+    highlight.enabled = false;
+    return;
+  }
+  if (index === total - 1 && cumulative !== highlight.wordCount) {
     highlight.enabled = false;
   }
 }
@@ -106,6 +115,8 @@ export const __testing = {
   stopHighlighting,
   recordChunkCues,
   highlightTick,
+  captureCues,
+  buildPageIndex,
   setPosition(currentChunkIndex, currentTime) {
     activePlayer = { currentChunkIndex, currentTime };
   },
