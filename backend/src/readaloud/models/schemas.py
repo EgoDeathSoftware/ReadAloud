@@ -16,16 +16,17 @@ class TtsGenerateRequest(BaseModel):
     known_chunks: list[KnownChunk] = Field(default_factory=list)
 
 
-class ChunkStatus(BaseModel):
-    index: int
-    hash: str
-    source: Literal["synthesized", "client_cache"]
-
-
 class Cue(BaseModel):
     text: str
     start: float
     end: float
+
+
+class ChunkStatus(BaseModel):
+    index: int
+    hash: str
+    source: Literal["synthesized", "client_cache"]
+    cues: list[Cue] = Field(default_factory=list)
 
 
 class TtsGenerateResponse(BaseModel):

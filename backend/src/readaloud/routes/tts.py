@@ -101,11 +101,18 @@ async def _process_long_text(
     session and uploaded it rather than asking for it to be resynthesized. Such
     a chunk has no real timestamps, since it was never sent to the TTS server
     this request.
+
+    Each chunk's cues are computed from its own audio as soon as it lands, so
+    a client that plays chunks individually has word timings for chunk 0 while
+    chunk 5 is still synthesizing. A chunk whose hash is already in
+    `known_by_hash` has no real timestamps, since it was never sent to the TTS
+    server this request, so its cues come from the character-count heuristic.
     """
     job = jobs[job_id]
     client = TtsClient()
     known_by_hash = known_by_hash or {}
-    timestamps_by_chunk: list[list[WordTimestamp] | None] = []
+    durations: list[float] = []
+    chunk_cues: list[list[Cue]] = []
 
     try:
         for i, chunk in enumerate(chunks):
@@ -114,24 +121,26 @@ async def _process_long_text(
             if cached_audio is not None:
                 audio = cached_audio
                 source = "client_cache"
-                timestamps_by_chunk.append(None)
+                timestamps = None
             else:
                 audio, timestamps = await client.generate_speech_with_timestamps(
                     chunk, voice, model, speed
                 )
                 source = "synthesized"
-                timestamps_by_chunk.append(timestamps)
+
+            duration = frame_duration_seconds(real_audio_frames(audio))
+            durations.append(duration)
+            chunk_cues.append(_chunk_cues(job_id, i, chunk, duration, timestamps))
 
             job_store.write_chunk(job_id, i, audio)
-            job.chunks.append(ChunkStatus(index=i, hash=chunk_hash, source=source))
+            job.chunks.append(
+                ChunkStatus(index=i, hash=chunk_hash, source=source, cues=chunk_cues[i])
+            )
             job.chunks_completed = i + 1
             job.progress = job.chunks_completed / job.chunks_total
 
         job_store.finalize_from_chunks(job_id, len(chunks))
-        try:
-            job.cues = _job_cues(job_id, chunks, timestamps_by_chunk)
-        except Exception:
-            logger.warning("Failed to compute reading cues for job %s", job_id, exc_info=True)
+        job.cues = _offset_cues(chunk_cues, durations)
         job.status = "complete"
     except Exception as exc:
         job.status = "failed"
@@ -140,22 +149,43 @@ async def _process_long_text(
         await client.close()
 
 
-def _job_cues(
+def _chunk_cues(
     job_id: str,
-    chunks: list[str],
-    timestamps_by_chunk: list[list[WordTimestamp] | None],
+    index: int,
+    chunk: str,
+    duration: float,
+    timestamps: list[WordTimestamp] | None,
 ) -> list[Cue]:
-    """Compute reading cues from each chunk's finalized audio.
+    """One chunk's cues, timed from 0.
 
-    Reads chunks back from `job_store` rather than the bytes just
-    synthesized, since a `client_cache`-sourced chunk was never held in
-    memory here to begin with.
+    A cue failure must not fail the job -- the audio is still good, and the
+    caller's alignment check will disable highlighting when a chunk comes
+    back empty.
     """
-    durations = []
-    for index in range(len(chunks)):
-        audio = job_store.read_chunk(job_id, index) or b""
-        durations.append(frame_duration_seconds(real_audio_frames(audio)))
-    return compute_cues(chunks, durations, timestamps_by_chunk)
+    try:
+        return compute_cues([chunk], [duration], [timestamps])
+    except Exception:
+        logger.warning("Failed to compute cues for job %s chunk %s", job_id, index, exc_info=True)
+        return []
+
+
+def _offset_cues(chunk_cues: list[list[Cue]], durations: list[float]) -> list[Cue]:
+    """Shift chunk-relative cues into the stitched audio's timeline.
+
+    Equivalent to one `compute_cues` call over the whole job, because chunks
+    are timed independently of each other. Clients that play chunks
+    individually need the chunk-relative form; the web frontend plays the
+    stitched file and needs this one.
+    """
+    cues: list[Cue] = []
+    offset = 0.0
+    for cues_for_chunk, duration in zip(chunk_cues, durations, strict=True):
+        cues.extend(
+            Cue(text=cue.text, start=cue.start + offset, end=cue.end + offset)
+            for cue in cues_for_chunk
+        )
+        offset += duration
+    return cues
 
 
 def _decode_known_chunks(known_chunks: list[KnownChunk]) -> dict[str, bytes]:
