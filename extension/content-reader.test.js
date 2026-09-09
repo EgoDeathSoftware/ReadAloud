@@ -130,3 +130,92 @@ describe("buildIndex from a selection", () => {
     expect(result.wordCount).toBe(window.__readaloud.words.length - result.startWordIndex);
   });
 });
+
+function stubHighlightApi() {
+  const registry = new Map();
+  globalThis.Highlight = class {
+    constructor(...ranges) {
+      this.ranges = ranges;
+    }
+  };
+  globalThis.CSS = { highlights: registry };
+  // jsdom implements neither Range#getBoundingClientRect nor
+  // Element#scrollIntoView; report the word as already on-screen so
+  // scrollIfNeeded never reaches the unimplemented scrollIntoView call.
+  Range.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 0 });
+  return registry;
+}
+
+describe("highlighting", () => {
+  it("registers a range around the requested word", () => {
+    const registry = stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+
+    window.__readaloud.highlight(1);
+
+    const highlight = registry.get("readaloud-word");
+    expect(highlight.ranges[0].toString()).toBe(window.__readaloud.words[1].text);
+  });
+
+  it("injects the highlight stylesheet once", () => {
+    stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+
+    window.__readaloud.highlight(0);
+    window.__readaloud.highlight(1);
+
+    expect(document.querySelectorAll("#readaloud-highlight-style")).toHaveLength(1);
+  });
+
+  it("ignores a word whose node has been removed from the page", () => {
+    const registry = stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+    document.getElementById("p1").remove();
+
+    expect(() => window.__readaloud.highlight(0)).not.toThrow();
+    expect(registry.has("readaloud-word")).toBe(false);
+  });
+
+  it("ignores an out-of-range index", () => {
+    const registry = stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+
+    expect(() => window.__readaloud.highlight(99999)).not.toThrow();
+    expect(registry.has("readaloud-word")).toBe(false);
+  });
+
+  it("clear removes the highlight and the stylesheet", () => {
+    const registry = stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+    window.__readaloud.highlight(0);
+
+    window.__readaloud.clear();
+
+    expect(registry.has("readaloud-word")).toBe(false);
+    expect(document.querySelector("#readaloud-highlight-style")).toBeNull();
+  });
+});
+
+describe("message API", () => {
+  it("registers a runtime message listener on injection", () => {
+    expect(globalThis.browser.runtime.onMessage.addListener).toHaveBeenCalled();
+  });
+
+  it("highlights on a readaloudHighlight message", () => {
+    const registry = stubHighlightApi();
+    pageWith(article());
+    window.__readaloud.buildIndex();
+    const listener = globalThis.browser.runtime.onMessage.addListener.mock.calls[0][0];
+
+    listener({ type: "readaloudHighlight", index: 2 });
+
+    expect(registry.get("readaloud-word").ranges[0].toString()).toBe(
+      window.__readaloud.words[2].text,
+    );
+  });
+});

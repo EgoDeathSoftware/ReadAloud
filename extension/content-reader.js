@@ -12,6 +12,8 @@
 
   const STAMP = "data-ra-id";
   const MAX_CHARS = 50_000;
+  const HIGHLIGHT_NAME = "readaloud-word";
+  const STYLE_ID = "readaloud-highlight-style";
   const BLOCK_TAGS = new Set([
     "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DIV", "DT", "FIGCAPTION", "H1",
     "H2", "H3", "H4", "H5", "H6", "LI", "MAIN", "P", "PRE", "SECTION", "TD",
@@ -132,6 +134,25 @@
     return 0;
   }
 
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `::highlight(${HIGHLIGHT_NAME}) { background-color: #ffd54f; color: #000; }`;
+    document.head.appendChild(style);
+  }
+
+  function removeStyle() {
+    document.getElementById(STYLE_ID)?.remove();
+  }
+
+  /** Scroll only when the word has left the viewport, matching ReadingText.tsx. */
+  function scrollIfNeeded(range) {
+    const rect = range.getBoundingClientRect();
+    if (rect.top >= 0 && rect.bottom <= window.innerHeight) return;
+    range.startContainer.parentElement?.scrollIntoView({ block: "nearest" });
+  }
+
   window.__readaloud = {
     get words() {
       return state.words;
@@ -167,5 +188,25 @@
         unstampAll();
       }
     },
+
+    /** Highlight word `index` of the current index, if it is still on the page. */
+    highlight(index) {
+      const range = rangeFor(state.words[index]);
+      if (!range) return;
+      ensureStyle();
+      CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(range));
+      scrollIfNeeded(range);
+    },
+
+    /** Remove the highlight and the stylesheet it needed. */
+    clear() {
+      CSS.highlights.delete(HIGHLIGHT_NAME);
+      removeStyle();
+    },
   };
+
+  browser.runtime.onMessage.addListener((message) => {
+    if (message.type === "readaloudHighlight") window.__readaloud.highlight(message.index);
+    else if (message.type === "readaloudClear") window.__readaloud.clear();
+  });
 })();
