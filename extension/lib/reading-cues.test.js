@@ -84,4 +84,27 @@ describe("cuesForChunk heuristic", () => {
   it("returns nothing for empty text", () => {
     expect(cuesForChunk("   ", 4, null)).toEqual([]);
   });
+
+  it("weights a digit-heavy word by estimated spoken length, not character count", () => {
+    // "1999" (4 chars) is spoken as roughly "nineteen ninety nine" -- far more
+    // speech than its literal character count suggests. Weighting it by raw
+    // character count (same as "abcd", also 4 chars) makes the highlight race
+    // past it while the audio is still pronouncing the year.
+    const cues = cuesForChunk("1999 abcd", 2, null);
+
+    expect(cues.map((c) => c.text)).toEqual(["1999", "abcd"]);
+    const numericSpan = cues[0].end - cues[0].start;
+    const plainSpan = cues[1].end - cues[1].start;
+    expect(numericSpan).toBeGreaterThan(plainSpan * 1.5);
+  });
+
+  it("applies digit weighting across sentences in a chunk too", () => {
+    // Both sentences are the same length (24 chars) so unweighted code would
+    // give them equal spans -- any inequality here is from the digit weighting.
+    const cues = cuesForChunk("The 1999 event happened. The nice event happened.", 4, null);
+
+    const numericSentenceEnd = cues.find((c) => c.text === "happened.").end;
+    const plainSentenceSpan = 4 - numericSentenceEnd;
+    expect(numericSentenceEnd).toBeGreaterThan(plainSentenceSpan);
+  });
 });

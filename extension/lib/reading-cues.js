@@ -37,19 +37,50 @@ function wordsOf(text) {
   return text.split(/\s+/).filter(Boolean);
 }
 
+/**
+ * Approximate how long `word` takes to speak, for the character-count heuristic.
+ *
+ * A token dominated by digits (a year, a price, a quantity) is spoken as multiple
+ * number words -- "1999" as "nineteen ninety nine" -- so weighting it by its literal
+ * character count badly underestimates its speaking time: the highlight races ahead
+ * while the audio is still pronouncing it, then slowly regains sync as the rest of
+ * the sentence's now-overly-generous allocation lets the audio catch up. Each digit
+ * gets a fixed stand-in length approximating an average spoken digit word ("nine",
+ * "zero" are both 4 characters); never returns less than the word's real length.
+ */
+function spokenWeight(word) {
+  const digitCount = (word.match(/\d/g) || []).length;
+  if (digitCount === 0) return word.length;
+  return Math.max(word.length, digitCount * 4);
+}
+
+/**
+ * `text.length`, boosted for any digit-heavy words it contains.
+ *
+ * Starting from `text.length` (not a sum of per-word weights) preserves the
+ * existing character-count heuristic exactly -- inter-word spaces included --
+ * for text with no digits, adding only the same boost `spokenWeight` gives a
+ * digit-heavy word on its own.
+ */
+function spokenLength(text) {
+  const words = wordsOf(text);
+  const boost = words.reduce((sum, word) => sum + (spokenWeight(word) - word.length), 0);
+  return text.length + boost;
+}
+
 function heuristicCues(text, duration) {
   const sentencesByParagraph = paragraphsOf(text).map((paragraph) =>
     splitSentences(paragraph).filter((sentence) => sentence.trim()),
   );
   const allSentences = sentencesByParagraph.flat();
-  const totalChars = allSentences.reduce((sum, sentence) => sum + sentence.length, 0);
+  const totalChars = allSentences.reduce((sum, sentence) => sum + spokenLength(sentence), 0);
   if (!allSentences.length || totalChars === 0) return [];
 
   const cues = [];
   let start = 0;
   sentencesByParagraph.forEach((paragraphSentences, paragraphIndex) => {
     paragraphSentences.forEach((sentence, sentenceIndex) => {
-      const end = start + duration * (sentence.length / totalChars);
+      const end = start + duration * (spokenLength(sentence) / totalChars);
       const lastInParagraph = sentenceIndex === paragraphSentences.length - 1;
       const lastParagraph = paragraphIndex === sentencesByParagraph.length - 1;
       const suffix = lastInParagraph && !lastParagraph ? "\n\n" : "";
@@ -62,14 +93,14 @@ function heuristicCues(text, duration) {
 
 function sentenceCues(sentence, start, end, suffix) {
   const words = wordsOf(sentence);
-  const totalChars = words.reduce((sum, word) => sum + word.length, 0);
+  const totalChars = words.reduce((sum, word) => sum + spokenWeight(word), 0);
   if (!words.length || totalChars === 0) return [];
 
   const duration = end - start;
   const cues = [];
   let cursor = start;
   words.forEach((word, index) => {
-    const wordEnd = cursor + duration * (word.length / totalChars);
+    const wordEnd = cursor + duration * (spokenWeight(word) / totalChars);
     const isLast = index === words.length - 1;
     cues.push({ text: isLast ? word + suffix : word, start: cursor, end: wordEnd });
     cursor = wordEnd;
