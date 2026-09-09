@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chunkText } from "./chunker.js";
+import { chunkText, splitSentences } from "./chunker.js";
 
 describe("chunkText", () => {
   it("returns an empty array for blank input", () => {
@@ -48,5 +48,36 @@ describe("chunkText", () => {
 
   it("emits a chunk for a single word longer than the limit", () => {
     expect(chunkText("X".repeat(30), 10)).toEqual(["X".repeat(30)]);
+  });
+});
+
+describe("splitSentences", () => {
+  it("splits on sentence-ending punctuation followed by whitespace", () => {
+    expect(splitSentences("One. Two! Three?")).toEqual(["One.", "Two!", "Three?"]);
+  });
+
+  it("returns a single sentence unchanged", () => {
+    expect(splitSentences("No terminator here")).toEqual(["No terminator here"]);
+  });
+});
+
+describe("chunk word round trip", () => {
+  it("preserves the word sequence across chunk boundaries", () => {
+    const paragraph = "Alpha beta gamma delta epsilon zeta eta theta iota kappa.";
+    const text = [paragraph, paragraph, paragraph, paragraph].join("\n\n");
+    const words = text.split(/\s+/).filter(Boolean);
+
+    const chunked = chunkText(text, 80).flatMap((chunk) => chunk.split(/\s+/).filter(Boolean));
+
+    expect(chunked).toEqual(words);
+  });
+
+  it("preserves the word sequence when a single sentence exceeds the chunk size", () => {
+    const text = "one two three four five six seven eight nine ten eleven twelve";
+    const words = text.split(" ");
+
+    const chunked = chunkText(text, 20).flatMap((chunk) => chunk.split(/\s+/).filter(Boolean));
+
+    expect(chunked).toEqual(words);
   });
 });
