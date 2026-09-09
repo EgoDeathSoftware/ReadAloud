@@ -12,6 +12,7 @@ export function createPlayer({ audioElement } = {}) {
   let stopped = false;
   let settleCurrent = null;
   let rate = 1.0;
+  let chunkIndex = -1;
 
   function releaseUrl() {
     if (currentUrl) {
@@ -38,6 +39,7 @@ export function createPlayer({ audioElement } = {}) {
     audio.onerror = null;
     settleCurrent = null;
     releaseUrl();
+    chunkIndex = -1;
     phase = "idle";
   }
 
@@ -56,6 +58,7 @@ export function createPlayer({ audioElement } = {}) {
         while (!stopped) {
           const { value, done } = await pending;
           if (done || stopped) break;
+          chunkIndex = value.index;
           pending = iterator.next();
           await playBlob(value.audio);
         }
@@ -82,6 +85,16 @@ export function createPlayer({ audioElement } = {}) {
     setSpeed(value) {
       rate = value;
       audio.playbackRate = rate;
+    },
+
+    /** Index of the chunk currently playing, or -1 when idle. */
+    get currentChunkIndex() {
+      return chunkIndex;
+    },
+
+    /** Playback position within the current chunk, in seconds. */
+    get currentTime() {
+      return audio.currentTime;
     },
 
     skip(seconds) {
