@@ -14,8 +14,12 @@ const EXTENSION_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
  * @param {string[]} exposeNames Top-level names to publish on globalThis.
  */
 export function loadScript(relativePath, exposeNames = []) {
-  // jsdom's URL implementation mishandles ".." across multiple path segments
-  // in file: URLs, so this joins with node:path instead of new URL(..).
+  // Resolved via node:path rather than new URL(`../${x}`, import.meta.url):
+  // under vitest's jsdom test environment, import.meta.url used in the same
+  // expression as a template literal resolves to the filesystem root instead
+  // of this file's directory (a Vite/Vitest transform quirk under that
+  // environment, not a jsdom URL bug -- jsdom's own URL class resolves
+  // relative paths correctly in isolation).
   const source = readFileSync(join(EXTENSION_ROOT, relativePath), "utf8");
   const tail = exposeNames.map((name) => `globalThis[${JSON.stringify(name)}] = ${name};`).join("");
   // eslint-disable-next-line no-new-func

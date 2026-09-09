@@ -96,6 +96,18 @@ describe("buildIndex", () => {
 
     expect(window.__readaloud.buildIndex()).toBeNull();
   });
+
+  it("truncates at a word boundary when the article exceeds 50,000 characters", () => {
+    const word = "abcdefghij";
+    const bigParagraph = Array.from({ length: 6000 }, () => word).join(" ");
+    pageWith(article(`<p id="p3">${bigParagraph}</p>`));
+
+    const { text } = window.__readaloud.buildIndex();
+
+    expect(text.length).toBeLessThanOrEqual(50_000);
+    const lastToken = text.trim().split(/\s+/).pop();
+    expect(lastToken).toBe(word);
+  });
 });
 
 describe("buildIndex from a selection", () => {
