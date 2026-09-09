@@ -129,6 +129,21 @@ describe("buildIndex from a selection", () => {
     expect(result.startWordIndex).toBeGreaterThan(0);
     expect(result.wordCount).toBe(window.__readaloud.words.length - result.startWordIndex);
   });
+
+  it("returns null when the selection sits in content Readability dropped", () => {
+    pageWith(article());
+    window.__readaloud.buildIndex();
+
+    const footerText = document.querySelector("footer p").firstChild;
+    const range = document.createRange();
+    range.setStart(footerText, 0);
+    range.setEnd(footerText, "Copyright".length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    expect(window.__readaloud.buildIndex({ fromSelection: true })).toBeNull();
+  });
 });
 
 function stubHighlightApi() {

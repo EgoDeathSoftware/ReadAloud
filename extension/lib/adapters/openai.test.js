@@ -223,7 +223,7 @@ describe("synthesize", () => {
   it("does not retry a 400 (permanent failure)", async () => {
     const { openaiAdapter } = await import("./openai.js");
     let attempts = 0;
-    globalThis.fetch = vi.fn(async () => {
+    globalThis.fetch = speechOnlyFetch(async () => {
       attempts += 1;
       return errorResponse({ error: { message: "Invalid voice: bogus" } }, 400);
     });
@@ -325,5 +325,73 @@ describe("synthesize", () => {
     expect(seen.some((url) => url.includes("/dev/captioned_speech"))).toBe(true);
     expect(seen.some((url) => url.includes("/v1/audio/speech"))).toBe(true);
     expect(items[0].cues.map((c) => c.text)).toEqual(["Hello", "there"]);
+  });
+
+  it("falls back to /v1/audio/speech when captioned speech errors with a 500", async () => {
+    const { openaiAdapter } = await import("./openai.js");
+    const seen = [];
+    globalThis.fetch = vi.fn(async (url) => {
+      seen.push(url);
+      if (url.includes("/dev/captioned_speech")) {
+        return errorResponse({ error: { message: "boom" } }, 500);
+      }
+      return blobResponse("audio");
+    });
+
+    const items = await collect(synth(openaiAdapter, { settings: directSettings }));
+
+    expect(seen.some((url) => url.includes("/dev/captioned_speech"))).toBe(true);
+    expect(seen.some((url) => url.includes("/v1/audio/speech"))).toBe(true);
+    expect(items).toHaveLength(1);
+  });
+
+  it("falls back to /v1/audio/speech when captioned speech throws a network error", async () => {
+    const { openaiAdapter } = await import("./openai.js");
+    const seen = [];
+    globalThis.fetch = vi.fn(async (url) => {
+      seen.push(url);
+      if (url.includes("/dev/captioned_speech")) throw new TypeError("NetworkError");
+      return blobResponse("audio");
+    });
+
+    const items = await collect(synth(openaiAdapter, { settings: directSettings }));
+
+    expect(seen.some((url) => url.includes("/dev/captioned_speech"))).toBe(true);
+    expect(seen.some((url) => url.includes("/v1/audio/speech"))).toBe(true);
+    expect(items).toHaveLength(1);
+  });
+
+  it("still aborts when the captioned speech request is aborted mid-flight", async () => {
+    const { openaiAdapter } = await import("./openai.js");
+    const controller = new AbortController();
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes("/dev/captioned_speech")) {
+        controller.abort();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return blobResponse("audio");
+    });
+
+    await expect(
+      collect(
+        synth(openaiAdapter, { settings: directSettings, signal: controller.signal }),
+      ),
+    ).rejects.toThrow(/Aborted/);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the fetched audio when captioned speech returns empty timestamps, without a second request", async () => {
+    const { openaiAdapter } = await import("./openai.js");
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return captionedResponse([]);
+    });
+
+    const items = await collect(synth(openaiAdapter, { settings: directSettings }));
+
+    expect(calls).toBe(1);
+    const buffer = await items[0].audio.arrayBuffer();
+    expect(new TextDecoder().decode(buffer)).toBe("audio");
   });
 });

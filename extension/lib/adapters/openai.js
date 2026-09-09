@@ -163,8 +163,14 @@ export const openaiAdapter = {
  */
 async function requestChunk(input, voice, settings, signal) {
   if (captionsSupported) {
-    const captioned = await requestCaptioned(input, voice, settings, signal);
-    if (captioned) return captioned;
+    try {
+      const captioned = await requestCaptioned(input, voice, settings, signal);
+      if (captioned) return captioned;
+    } catch (err) {
+      if (err.name === "AbortError") throw err;
+      // Any other captions failure (network error, 5xx, ...) falls through to
+      // the plain speech endpoint rather than failing the whole read.
+    }
   }
   const audio = await requestSpeech(input, voice, settings, signal);
   return { audio, timestamps: null, duration: 0 };
@@ -197,10 +203,11 @@ async function requestCaptioned(input, voice, settings, signal) {
     start: item.start_time,
     end: item.end_time,
   }));
-  if (!timestamps.length) return null;
+  const audio = base64ToBlob(data.audio);
+  if (!timestamps.length) return { audio, timestamps: null, duration: 0 };
 
   return {
-    audio: base64ToBlob(data.audio),
+    audio,
     timestamps,
     duration: timestamps[timestamps.length - 1].end,
   };

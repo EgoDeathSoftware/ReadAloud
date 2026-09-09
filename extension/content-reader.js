@@ -117,7 +117,11 @@
     return range;
   }
 
-  /** Index of the first word the selection touches, or 0 if there is none. */
+  /**
+   * Index of the first word the selection touches. Returns 0 when there is no
+   * selection, or -1 when a selection exists but touches no indexed word
+   * (e.g. it sits inside content Readability dropped, like a footer or nav).
+   */
   function selectionStartIndex(words) {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return 0;
@@ -131,7 +135,7 @@
         return index;
       }
     }
-    return 0;
+    return -1;
   }
 
   function ensureStyle() {
@@ -178,6 +182,7 @@
         state.words = words;
 
         const startWordIndex = fromSelection ? selectionStartIndex(words) : 0;
+        if (startWordIndex === -1) return null;
         return {
           title: parsed.title,
           text: joinWords(words, startWordIndex),
