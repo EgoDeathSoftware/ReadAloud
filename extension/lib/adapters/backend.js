@@ -77,6 +77,7 @@ export const backendAdapter = {
         audio: await fetchAudio(settings, `/api/tts/audio/${job.job_id}`, signal),
         index: 0,
         total: 1,
+        cues: job.cues || [],
       };
       return;
     }
@@ -98,13 +99,17 @@ export const backendAdapter = {
         const info = status.chunks?.find((c) => c.index === nextChunk);
         const cached = info ? chunkCache.get(voice, info.hash) : null;
         let audio;
+        let cues = info?.cues || [];
         if (info?.source === "client_cache" && cached) {
           audio = cached.blob;
+          // The server never synthesized this chunk, so its cues came from the
+          // heuristic. The cached ones may be the server's real timings.
+          if (cached.cues.length) cues = cached.cues;
         } else {
           audio = await fetchAudio(settings, `/api/tts/audio/${job.job_id}/${nextChunk}`, signal);
-          if (info) chunkCache.set(voice, info.hash, audio);
+          if (info) chunkCache.set(voice, info.hash, audio, cues);
         }
-        yield { audio, index: nextChunk, total: status.chunks_total };
+        yield { audio, index: nextChunk, total: status.chunks_total, cues };
         nextChunk += 1;
       }
 

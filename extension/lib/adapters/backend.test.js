@@ -211,4 +211,71 @@ describe("synthesize", () => {
     await run({ voice: "af_heart" });
     expect(chunkCache.get("af_heart", "hash-b")).not.toBeNull();
   });
+
+  it("yields the cues from the generate response on the short-text path", async () => {
+    const cues = [{ text: "Hello.", start: 0, end: 1 }];
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.endsWith("/api/tts/generate")) {
+        return jsonResponse({ job_id: "j1", status: "complete", cues });
+      }
+      return blobResponse();
+    });
+
+    const items = await run();
+
+    expect(items[0].cues).toEqual(cues);
+  });
+
+  it("yields each chunk's cues from the status response", async () => {
+    const chunkCues = [
+      [{ text: "one", start: 0, end: 1 }],
+      [{ text: "two", start: 0, end: 1 }],
+    ];
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.endsWith("/api/tts/generate")) {
+        return jsonResponse({ job_id: "j1", status: "processing" });
+      }
+      if (url.includes("/api/tts/status/")) {
+        return jsonResponse({
+          status: "complete",
+          progress: 1,
+          chunks_completed: 2,
+          chunks_total: 2,
+          chunks: [
+            { index: 0, hash: "h0", source: "synthesized", cues: chunkCues[0] },
+            { index: 1, hash: "h1", source: "synthesized", cues: chunkCues[1] },
+          ],
+        });
+      }
+      return blobResponse();
+    });
+
+    const items = await run();
+
+    expect(items.map((item) => item.cues)).toEqual(chunkCues);
+  });
+
+  it("restores cues from the chunk cache on a client_cache hit", async () => {
+    const cues = [{ text: "cached", start: 0, end: 1 }];
+    chunkCache.set("af_heart", "h0", new Blob(["audio"]), cues);
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.endsWith("/api/tts/generate")) {
+        return jsonResponse({ job_id: "j1", status: "processing" });
+      }
+      if (url.includes("/api/tts/status/")) {
+        return jsonResponse({
+          status: "complete",
+          progress: 1,
+          chunks_completed: 1,
+          chunks_total: 1,
+          chunks: [{ index: 0, hash: "h0", source: "client_cache", cues: [] }],
+        });
+      }
+      return blobResponse();
+    });
+
+    const items = await run();
+
+    expect(items[0].cues).toEqual(cues);
+  });
 });
