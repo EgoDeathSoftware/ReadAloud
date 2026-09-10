@@ -15,8 +15,18 @@ export function chunkText(text, maxChars) {
   );
 }
 
+/**
+ * Split text into sentences on `.`, `!`, or `?` followed by whitespace.
+ *
+ * Mirrors `split_sentences` in backend/src/readaloud/services/text_chunker.py.
+ * Shared with reading-cues.js so cue sentence boundaries match the chunker's.
+ */
+export function splitSentences(text) {
+  return text.split(/(?<=[.!?])\s+/);
+}
+
 function splitLongParagraph(text, maxChars) {
-  return packSegments(text.split(/(?<=[.!?])\s+/), maxChars, " ", (sentence) =>
+  return packSegments(splitSentences(text), maxChars, " ", (sentence) =>
     splitLongSentence(sentence, maxChars),
   );
 }

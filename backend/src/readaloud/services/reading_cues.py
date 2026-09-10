@@ -83,11 +83,39 @@ def compute_cues(
     return cues
 
 
+def _spoken_weight(word: str) -> int:
+    """Approximate how long `word` takes to speak, for the character-count heuristic.
+
+    A token dominated by digits (a year, a price, a quantity) is spoken as multiple
+    number words -- "1999" as "nineteen ninety nine" -- so weighting it by its literal
+    character count badly underestimates its speaking time: the highlight races ahead
+    while the audio is still pronouncing it, then slowly regains sync as the rest of
+    the sentence's now-overly-generous allocation lets the audio catch up. Each digit
+    gets a fixed stand-in length approximating an average spoken digit word ("nine",
+    "zero" are both 4 characters); never returns less than the word's real length.
+    """
+    digit_count = sum(1 for ch in word if ch.isdigit())
+    if digit_count == 0:
+        return len(word)
+    return max(len(word), digit_count * 4)
+
+
+def _spoken_length(text: str) -> int:
+    """`len(text)`, boosted for any digit-heavy words it contains.
+
+    Starting from `len(text)` (not a sum of per-word weights) preserves the
+    existing character-count heuristic exactly -- inter-word spaces included --
+    for text with no digits, adding only the same boost `_spoken_weight` gives
+    a digit-heavy word on its own.
+    """
+    return len(text) + sum(_spoken_weight(word) - len(word) for word in text.split())
+
+
 def _cues_for_chunk(text: str, duration: float, offset: float) -> list[Cue]:
     paragraphs = [p for p in re.split(r"\n\n+", text) if p.strip()]
     sentences_by_paragraph = [[s for s in split_sentences(p) if s.strip()] for p in paragraphs]
     all_sentences = [s for para in sentences_by_paragraph for s in para]
-    total_chars = sum(len(s) for s in all_sentences)
+    total_chars = sum(_spoken_length(s) for s in all_sentences)
     if not all_sentences or total_chars == 0:
         return []
 
@@ -95,7 +123,7 @@ def _cues_for_chunk(text: str, duration: float, offset: float) -> list[Cue]:
     start = offset
     for para_index, para_sentences in enumerate(sentences_by_paragraph):
         for sent_index, sentence in enumerate(para_sentences):
-            end = start + duration * (len(sentence) / total_chars)
+            end = start + duration * (_spoken_length(sentence) / total_chars)
             is_last_sentence_in_para = sent_index == len(para_sentences) - 1
             is_last_paragraph = para_index == len(sentences_by_paragraph) - 1
             suffix = "\n\n" if is_last_sentence_in_para and not is_last_paragraph else ""
@@ -112,7 +140,7 @@ def _cues_for_sentence(sentence: str, start: float, end: float, suffix: str) -> 
     real per-word timing from the TTS server to split on.
     """
     words = sentence.split()
-    total_chars = sum(len(word) for word in words)
+    total_chars = sum(_spoken_weight(word) for word in words)
     if not words or total_chars == 0:
         return []
 
@@ -120,7 +148,7 @@ def _cues_for_sentence(sentence: str, start: float, end: float, suffix: str) -> 
     cues: list[Cue] = []
     cursor = start
     for index, word in enumerate(words):
-        word_end = cursor + duration * (len(word) / total_chars)
+        word_end = cursor + duration * (_spoken_weight(word) / total_chars)
         is_last_word = index == len(words) - 1
         cue_text = word + suffix if is_last_word else word
         cues.append(Cue(text=cue_text, start=cursor, end=word_end))

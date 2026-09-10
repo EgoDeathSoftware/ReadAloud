@@ -6,7 +6,7 @@ import { createPlayer } from "/lib/player.js";
 import { sha256Hex } from "/lib/hash.js";
 import { loadSettings } from "/lib/settings.js";
 import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
-import { sliceFromArticle } from "/lib/read-from-here.js";
+import { findActiveCueIndex } from "/lib/cues.js";
 
 const state = {
   phase: "idle",
@@ -18,6 +18,109 @@ const state = {
 
 const player = createPlayer({});
 let abortController = null;
+
+const HIGHLIGHT_INTERVAL_MS = 100;
+
+/**
+ * Word-highlight state for the current read. `cueChunks[i]` holds chunk i's
+ * chunk-relative cues and `chunkOffsets[i]` how many words precede it, so a
+ * (chunk, time) position resolves to one index into the tab's word list.
+ * `enabled` goes false the moment the cues stop lining up with the indexed
+ * words -- audio keeps playing, the highlight just stops.
+ */
+const highlight = {
+  tabId: null,
+  enabled: false,
+  wordOffset: 0,
+  wordCount: 0,
+  cueChunks: [],
+  chunkOffsets: [],
+  activeIndex: null,
+  timer: null,
+};
+let activePlayer = player;
+
+function startHighlighting({ tabId, wordOffset, wordCount }) {
+  highlight.tabId = tabId;
+  highlight.enabled = true;
+  highlight.wordOffset = wordOffset;
+  highlight.wordCount = wordCount;
+  highlight.cueChunks = [];
+  highlight.chunkOffsets = [];
+  highlight.activeIndex = null;
+  highlight.timer = setInterval(highlightTick, HIGHLIGHT_INTERVAL_MS);
+}
+
+function stopHighlighting() {
+  if (highlight.timer !== null) clearInterval(highlight.timer);
+  highlight.timer = null;
+  if (highlight.tabId !== null) {
+    browser.tabs.sendMessage(highlight.tabId, { type: "readaloudClear" }).catch(() => {});
+  }
+  highlight.tabId = null;
+  highlight.enabled = false;
+  highlight.activeIndex = null;
+}
+
+/**
+ * Record a chunk's cues as it is yielded, and check they still line up.
+ * `total` is the adapter's chunk count for the whole read; on the last chunk
+ * the cumulative cue count must exactly match `wordCount` -- an undercount
+ * would otherwise desync every highlight position for the rest of the read.
+ */
+function recordChunkCues({ index, total, cues }) {
+  highlight.cueChunks[index] = cues || [];
+  highlight.chunkOffsets[index] =
+    index === 0
+      ? 0
+      : (highlight.chunkOffsets[index - 1] || 0) + (highlight.cueChunks[index - 1]?.length || 0);
+
+  const cumulative = highlight.chunkOffsets[index] + highlight.cueChunks[index].length;
+  if (highlight.cueChunks[index].length === 0 || cumulative > highlight.wordCount) {
+    highlight.enabled = false;
+    return;
+  }
+  if (index === total - 1 && cumulative !== highlight.wordCount) {
+    highlight.enabled = false;
+  }
+}
+
+function highlightTick() {
+  if (!highlight.enabled || highlight.tabId === null) return;
+  const chunk = activePlayer.currentChunkIndex;
+  const cues = highlight.cueChunks[chunk];
+  if (!cues) return;
+
+  const local = findActiveCueIndex(cues, activePlayer.currentTime);
+  if (local === null) return;
+
+  const index = highlight.wordOffset + highlight.chunkOffsets[chunk] + local;
+  if (index === highlight.activeIndex) return;
+  highlight.activeIndex = index;
+  browser.tabs
+    .sendMessage(highlight.tabId, { type: "readaloudHighlight", index })
+    .catch(() => {});
+}
+
+/** Pass chunks through to the player while recording their cues. */
+async function* captureCues(generator) {
+  for await (const item of generator) {
+    recordChunkCues(item);
+    yield item;
+  }
+}
+
+export const __testing = {
+  startHighlighting,
+  stopHighlighting,
+  recordChunkCues,
+  highlightTick,
+  captureCues,
+  buildPageIndex,
+  setPosition(currentChunkIndex, currentTime) {
+    activePlayer = { currentChunkIndex, currentTime };
+  },
+};
 
 function resetState() {
   state.phase = "idle";
@@ -46,6 +149,7 @@ function stopAll() {
   abortController?.abort();
   abortController = null;
   player.stop();
+  stopHighlighting();
   resetState();
   broadcastState();
 }
@@ -73,8 +177,8 @@ async function buildKnownChunks(text, voice, settings, signal) {
     const knownChunks = [];
     for (const chunk of chunkText(text, maxChunkChars)) {
       const hash = await sha256Hex(chunk);
-      const blob = chunkCache.get(voice, hash);
-      if (blob) knownChunks.push({ hash, audioB64: await blobToBase64(blob) });
+      const entry = chunkCache.get(voice, hash);
+      if (entry) knownChunks.push({ hash, audioB64: await blobToBase64(entry.blob) });
     }
     return knownChunks;
   } catch {
@@ -82,7 +186,7 @@ async function buildKnownChunks(text, voice, settings, signal) {
   }
 }
 
-async function handleReadRequest(text, voice, speed) {
+async function handleReadRequest(text, voice, speed, highlightTarget = null) {
   stopAll();
 
   if (!text || text.trim().length === 0) {
@@ -119,7 +223,8 @@ async function handleReadRequest(text, voice, speed) {
 
   try {
     setPhase("playing");
-    await player.play(generator);
+    if (highlightTarget) startHighlighting(highlightTarget);
+    await player.play(highlightTarget ? captureCues(generator) : generator);
     if (state.phase !== "error") {
       resetState();
       broadcastState();
@@ -129,17 +234,22 @@ async function handleReadRequest(text, voice, speed) {
     setError(err.message);
   } finally {
     abortController = null;
+    stopHighlighting();
   }
 }
 
-// Inject Readability.js first (defines the global), then run the extractor.
-// Returns the extracted article text, or null if nothing could be extracted.
-async function extractArticleText(tab) {
+// Inject Readability.js first (defines the global), then the reader, then ask
+// it to index the page. The word index stays in the tab -- only plain data
+// crosses back.
+async function buildPageIndex(tab, { fromSelection = false } = {}) {
   await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
-  const results = await browser.tabs.executeScript(tab.id, { file: "content.js" });
+  await browser.tabs.executeScript(tab.id, { file: "content-reader.js" });
+  const results = await browser.tabs.executeScript(tab.id, {
+    code: `window.__readaloud.buildIndex({ fromSelection: ${fromSelection} })`,
+  });
   const article = results && results[0];
   if (!article || !article.text || article.text.trim().length === 0) return null;
-  return article.text;
+  return article;
 }
 
 async function handleReadPage(tab, voice, speed) {
@@ -153,36 +263,38 @@ async function handleReadPage(tab, voice, speed) {
   setPhase("extracting");
 
   try {
-    const text = await extractArticleText(tab);
-    if (!text) {
+    const article = await buildPageIndex(tab);
+    if (!article) {
       setError("No article content could be extracted from this page");
       return;
     }
 
-    await handleReadRequest(text, voice, speed);
+    await handleReadRequest(article.text, voice, speed, {
+      tabId: tab.id,
+      wordOffset: article.startWordIndex,
+      wordCount: article.wordCount,
+    });
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
   }
 }
 
-async function handleReadFromHere(tab, selectionText, voice, speed) {
+async function handleReadFromHere(tab, voice, speed) {
   stopAll();
   setPhase("extracting");
 
   try {
-    const articleText = await extractArticleText(tab);
-    if (!articleText) {
+    const article = await buildPageIndex(tab, { fromSelection: true });
+    if (!article) {
       setError("No article content could be extracted from this page");
       return;
     }
 
-    const fromHere = sliceFromArticle(articleText, selectionText);
-    if (!fromHere) {
-      setError("Could not find that selection in the page text");
-      return;
-    }
-
-    await handleReadRequest(fromHere, voice, speed);
+    await handleReadRequest(article.text, voice, speed, {
+      tabId: tab.id,
+      wordOffset: article.startWordIndex,
+      wordCount: article.wordCount,
+    });
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
   }
@@ -270,7 +382,7 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
     handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-from-here" && info.selectionText && tab.id) {
-    handleReadFromHere(tab, info.selectionText, settings.defaultVoice, settings.defaultSpeed);
+    handleReadFromHere(tab, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
     handleReadPage(tab, settings.defaultVoice, settings.defaultSpeed);
   }

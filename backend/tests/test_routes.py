@@ -319,6 +319,95 @@ async def test_long_text_job_status_cues_have_nonzero_duration(temp_job_store):
     assert job.cues[-1].end == pytest.approx(expected_total)
 
 
+async def test_chunk_status_cues_are_chunk_relative(temp_job_store):
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "chunk-cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+    frame = build_frame(bitrate_index=1, samplerate_index=0, mode=0)
+    audio = frame + frame
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(audio, None))
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id, ["Chunk one.", "Chunk two."], "af_heart", "kokoro", 1.0
+        )
+
+    job = jobs[job_id]
+    assert [c.text for c in job.chunks[0].cues] == ["Chunk", "one."]
+    assert [c.text for c in job.chunks[1].cues] == ["Chunk", "two."]
+    assert job.chunks[0].cues[0].start == 0.0
+    assert job.chunks[1].cues[0].start == 0.0
+
+
+async def test_chunk_cues_land_before_the_job_completes(temp_job_store):
+    import asyncio
+
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "streaming-cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+    frame = build_frame(bitrate_index=1, samplerate_index=0, mode=0)
+    audio = frame + frame
+    release_second = asyncio.Event()
+
+    async def generate(chunk, *args, **kwargs):
+        if chunk == "Chunk two.":
+            await release_second.wait()
+        return audio, None
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech_with_timestamps = AsyncMock(side_effect=generate)
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        task = asyncio.create_task(
+            tts_routes._process_long_text(
+                job_id, ["Chunk one.", "Chunk two."], "af_heart", "kokoro", 1.0
+            )
+        )
+        while jobs[job_id].chunks_completed < 1:
+            await asyncio.sleep(0)
+
+        job = jobs[job_id]
+        assert job.status == "processing"
+        assert job.cues == []
+        assert [c.text for c in job.chunks[0].cues] == ["Chunk", "one."]
+
+        release_second.set()
+        await task
+
+
+async def test_job_cues_stay_in_the_stitched_timeline(temp_job_store):
+    from tests.mp3_test_helpers import build_frame
+
+    job_id = "offset-cues-job"
+    jobs[job_id] = JobState(id=job_id, chunks_total=2)
+    frame = build_frame(bitrate_index=1, samplerate_index=0, mode=0)
+    audio = frame + frame
+    chunk_duration = (1152 / 44100) * 2
+
+    with patch("readaloud.routes.tts.TtsClient") as mock_cls:
+        mock_client = MagicMock()
+        mock_client.generate_speech_with_timestamps = AsyncMock(return_value=(audio, None))
+        mock_client.close = AsyncMock()
+        mock_cls.return_value = mock_client
+
+        await tts_routes._process_long_text(
+            job_id, ["Chunk one.", "Chunk two."], "af_heart", "kokoro", 1.0
+        )
+
+    job = jobs[job_id]
+    assert [c.text for c in job.cues] == ["Chunk", "one.", "Chunk", "two."]
+    assert job.cues[2].start == pytest.approx(chunk_duration)
+    assert job.cues[-1].end == pytest.approx(2 * chunk_duration)
+
+
 async def test_known_chunk_hash_skips_synthesis(temp_job_store):
     import hashlib
 

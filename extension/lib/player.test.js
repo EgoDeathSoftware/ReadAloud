@@ -156,6 +156,40 @@ describe("createPlayer", () => {
     expect(audio.currentTime).toBe(10);
   });
 
+  it("reports the index of the chunk being played", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+    expect(player.currentChunkIndex).toBe(-1);
+
+    const seen = [];
+    const generator = (async function* () {
+      yield { audio: new Blob(["a"]), index: 0, total: 2, cues: [] };
+      seen.push(player.currentChunkIndex);
+      yield { audio: new Blob(["b"]), index: 1, total: 2, cues: [] };
+      seen.push(player.currentChunkIndex);
+    })();
+
+    const done = player.play(generator);
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    audio.finish();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2));
+    audio.finish();
+    await done;
+
+    expect(seen[0]).toBe(0);
+    expect(player.currentChunkIndex).toBe(-1);
+  });
+
+  it("reports the current time of the playing chunk", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    audio.currentTime = 1.25;
+    const player = createPlayer({ audioElement: audio });
+
+    expect(player.currentTime).toBe(1.25);
+  });
+
   it("propagates a generator failure", async () => {
     setupObjectUrls();
     const audio = fakeAudio();

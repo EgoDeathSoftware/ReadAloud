@@ -288,3 +288,33 @@ def test_cues_from_timestamps_last_cue_reaches_chunk_duration():
     cues = _cues_from_timestamps("One two.", timestamps, offset=5.0, duration=1.0)
 
     assert cues[-1].end == pytest.approx(6.0)
+
+
+def test_heuristic_weights_digit_heavy_words_by_estimated_spoken_length():
+    # "1999" (4 chars) is spoken as roughly "nineteen ninety nine" -- far more
+    # speech than its literal character count suggests. Weighting it by raw
+    # character count (same as "abcd", also 4 chars) makes the highlight race
+    # past it while the audio is still pronouncing the year, then slowly
+    # regain sync as the rest of the sentence's overly generous allocation
+    # lets the audio catch up. This is the mechanism, not the disproving
+    # length -- so require a clear margin, not just "greater than".
+    cues = compute_cues(["1999 abcd"], [2.0], [None])
+
+    assert [c.text for c in cues] == ["1999", "abcd"]
+    numeric_span = cues[0].end - cues[0].start
+    plain_span = cues[1].end - cues[1].start
+    assert numeric_span > plain_span * 1.5
+
+
+def test_heuristic_digit_weighting_applies_across_sentences_in_a_chunk():
+    # The same under-weighting happens one level up: _cues_for_chunk splits
+    # duration across sentences by character length too, so a numeral-heavy
+    # sentence must get more than an equal-length numeral-free sentence's
+    # share of the chunk. Both sentences are the same length (24 chars), so
+    # unweighted code would give them equal spans -- any inequality here is
+    # from the digit weighting, not from a length difference.
+    cues = compute_cues(["The 1999 event happened. The nice event happened."], [4.0], [None])
+
+    numeric_sentence_end = next(c.end for c in cues if c.text == "happened.")
+    plain_sentence_span = 4.0 - numeric_sentence_end
+    assert numeric_sentence_end > plain_sentence_span

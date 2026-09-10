@@ -16,7 +16,7 @@ describe("createChunkCache", () => {
     const cache = createChunkCache();
     const b = blob(10);
     cache.set("af_heart", "hash-1", b);
-    expect(cache.get("af_heart", "hash-1")).toBe(b);
+    expect(cache.get("af_heart", "hash-1").blob).toBe(b);
   });
 
   it("keeps entries separate per voice for the same hash", () => {
@@ -25,8 +25,25 @@ describe("createChunkCache", () => {
     const b = blob(10);
     cache.set("af_heart", "hash-1", a);
     cache.set("am_adam", "hash-1", b);
-    expect(cache.get("af_heart", "hash-1")).toBe(a);
-    expect(cache.get("am_adam", "hash-1")).toBe(b);
+    expect(cache.get("af_heart", "hash-1").blob).toBe(a);
+    expect(cache.get("am_adam", "hash-1").blob).toBe(b);
+  });
+
+  it("returns the cues stored with the audio", () => {
+    const cache = createChunkCache();
+    const b = new Blob(["audio"]);
+    const cues = [{ text: "hi", start: 0, end: 1 }];
+
+    cache.set("af_heart", "hash1", b, cues);
+
+    expect(cache.get("af_heart", "hash1")).toEqual({ blob: b, cues });
+  });
+
+  it("stores an empty cue list when none is given", () => {
+    const cache = createChunkCache();
+    cache.set("af_heart", "hash1", new Blob(["audio"]));
+
+    expect(cache.get("af_heart", "hash1").cues).toEqual([]);
   });
 
   it("evicts the oldest entry once the byte budget is exceeded", () => {
