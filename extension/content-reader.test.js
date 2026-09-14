@@ -88,13 +88,13 @@ describe("buildIndex", () => {
     expect(window.__readaloud.words.length).toBe(before);
   });
 
-  it("returns null when nothing can be extracted", () => {
+  it("returns a no-article error when nothing can be extracted", () => {
     // A short paragraph still yields content (Readability only returns null
     // when extraction finds no text at all, not merely under its char
     // threshold), so this fixture must have no extractable text.
     pageWith("");
 
-    expect(window.__readaloud.buildIndex()).toBeNull();
+    expect(window.__readaloud.buildIndex()).toEqual({ error: "no-article" });
   });
 
   it("truncates at a word boundary when the article exceeds 50,000 characters", () => {
@@ -107,6 +107,69 @@ describe("buildIndex", () => {
     expect(text.length).toBeLessThanOrEqual(50_000);
     const lastToken = text.trim().split(/\s+/).pop();
     expect(lastToken).toBe(word);
+  });
+});
+
+describe("buildIndex with content split by an ad interlude", () => {
+  // Mirrors real-world layouts (e.g. Ars Technica) where the article body is
+  // split across two ".post-content" containers separated by an ad block and
+  // a layout wrapper -- not direct DOM siblings, so Readability's own
+  // sibling-merge never considers the second one and drops it outright.
+  function splitArticle() {
+    return `
+      <nav><a href="/">Home</a><a href="/about">About</a></nav>
+      <div class="post-content">
+        <p id="p1">${PARAGRAPH}</p>
+        <p id="p2">${PARAGRAPH}</p>
+      </div>
+      <div class="ad-interlude">Advertisement</div>
+      <div class="grid-wrapper">
+        <div class="grid-col-main">
+          <div class="post-content">
+            <p id="p3">${PARAGRAPH}</p>
+          </div>
+        </div>
+      </div>
+      <footer><p>Copyright notice that is not part of the article body.</p></footer>
+    `;
+  }
+
+  it("recovers the second container's text", () => {
+    pageWith(splitArticle());
+
+    const { text } = window.__readaloud.buildIndex();
+
+    expect(text).toContain("Local text to speech");
+    const occurrences = text.split("Local text to speech").length - 1;
+    expect(occurrences).toBe(3);
+  });
+
+  it("indexes the recovered container's words against the live DOM", () => {
+    pageWith(splitArticle());
+
+    window.__readaloud.buildIndex();
+    const recovered = window.__readaloud.words.find((word) => word.node.parentElement.id === "p3");
+
+    expect(recovered).toBeDefined();
+  });
+
+  it("does not recover a short, link-heavy block sharing the same class", () => {
+    pageWith(`
+      <div class="post-content">
+        <p id="p1">${PARAGRAPH}</p>
+        <p id="p2">${PARAGRAPH}</p>
+      </div>
+      <div class="ad-interlude">Advertisement</div>
+      <div class="grid-wrapper">
+        <div class="grid-col-main">
+          <div class="post-content"><a href="/1">Related</a> <a href="/2">Stories</a></div>
+        </div>
+      </div>
+    `);
+
+    const { text } = window.__readaloud.buildIndex();
+
+    expect(text).not.toContain("Related");
   });
 });
 
@@ -130,7 +193,7 @@ describe("buildIndex from a selection", () => {
     expect(result.wordCount).toBe(window.__readaloud.words.length - result.startWordIndex);
   });
 
-  it("returns null when the selection sits in content Readability dropped", () => {
+  it("returns an outside-article error when the selection sits in content Readability dropped", () => {
     pageWith(article());
     window.__readaloud.buildIndex();
 
@@ -142,7 +205,9 @@ describe("buildIndex from a selection", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    expect(window.__readaloud.buildIndex({ fromSelection: true })).toBeNull();
+    expect(window.__readaloud.buildIndex({ fromSelection: true })).toEqual({
+      error: "outside-article",
+    });
   });
 });
 

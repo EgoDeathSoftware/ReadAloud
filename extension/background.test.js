@@ -6,6 +6,7 @@ function fakeBrowser() {
   return {
     runtime: { sendMessage: vi.fn(async () => {}), onMessage: { addListener: vi.fn() } },
     contextMenus: { create: vi.fn(), onClicked: { addListener: vi.fn() } },
+    browserAction: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
     tabs: {
       query: vi.fn(async () => [{ id: 7, url: "https://example.com" }]),
       executeScript: vi.fn(),

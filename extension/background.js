@@ -128,6 +128,7 @@ function resetState() {
   state.chunksCompleted = 0;
   state.chunksTotal = 0;
   state.error = null;
+  browser.browserAction.setBadgeText({ text: "" });
 }
 
 function broadcastState() {
@@ -139,9 +140,13 @@ function setPhase(phase) {
   broadcastState();
 }
 
+/** Sets an error and badges the toolbar icon, since the popup isn't open for
+ * errors raised from a context-menu action. */
 function setError(message) {
   state.phase = "error";
   state.error = message;
+  browser.browserAction.setBadgeText({ text: "!" });
+  browser.browserAction.setBadgeBackgroundColor({ color: "#d32f2f" });
   broadcastState();
 }
 
@@ -248,9 +253,19 @@ async function buildPageIndex(tab, { fromSelection = false } = {}) {
     code: `window.__readaloud.buildIndex({ fromSelection: ${fromSelection} })`,
   });
   const article = results && results[0];
-  if (!article || !article.text || article.text.trim().length === 0) return null;
+  if (!article || (!article.error && (!article.text || article.text.trim().length === 0))) {
+    return { error: "no-article" };
+  }
   return article;
 }
+
+const EXTRACTION_ERROR_MESSAGES = {
+  "no-article": "No article content could be extracted from this page",
+  "outside-article":
+    "That selection isn't part of the article text this page extracted (it may sit outside " +
+    "the main content, e.g. a caption or a section split off by an ad). Try selecting text " +
+    "elsewhere in the article, or use Read Page instead.",
+};
 
 async function handleReadPage(tab, voice, speed) {
   stopAll();
@@ -264,8 +279,8 @@ async function handleReadPage(tab, voice, speed) {
 
   try {
     const article = await buildPageIndex(tab);
-    if (!article) {
-      setError("No article content could be extracted from this page");
+    if (article.error) {
+      setError(EXTRACTION_ERROR_MESSAGES[article.error]);
       return;
     }
 
@@ -285,8 +300,8 @@ async function handleReadFromHere(tab, voice, speed) {
 
   try {
     const article = await buildPageIndex(tab, { fromSelection: true });
-    if (!article) {
-      setError("No article content could be extracted from this page");
+    if (article.error) {
+      setError(EXTRACTION_ERROR_MESSAGES[article.error]);
       return;
     }
 
