@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     TTS_MODEL: str = "kokoro"
     TTS_DEFAULT_VOICE: str = "af_heart"
     TTS_API_KEY: str = ""
-    MAX_CHUNK_CHARS: int = 4000
+    MAX_CHUNK_CHARS: int = 1000
     # Comma-separated browser origins allowed to call the API. Empty means
     # DEFAULT_ALLOWED_ORIGINS. Declared as a string rather than list[str] because
     # pydantic-settings would otherwise expect JSON in the environment variable.
