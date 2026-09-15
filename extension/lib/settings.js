@@ -3,7 +3,7 @@ export const TARGET_DIRECT = "direct";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   ttsTarget: TARGET_BACKEND,
-  backendUrl: "http://localhost:8000",
+  backendUrl: "http://localhost:9000",
   directUrl: "http://localhost:8880",
   directApiKey: "",
   directModel: "kokoro",
