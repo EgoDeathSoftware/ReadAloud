@@ -15,7 +15,7 @@ import "src/App.css";
 
 export function App() {
   const [text, setText] = useState("");
-  const [voice, setVoice] = useState("af_heart");
+  const [voice, setVoice] = useState(useSettingsStore.getState().tts_default_voice);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeCueIndex, setActiveCueIndex] = useState<number | null>(null);
   const tts = useTts();
