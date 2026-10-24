@@ -186,11 +186,32 @@ describe("buildIndex from a selection", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    const result = window.__readaloud.buildIndex({ fromSelection: true });
+    const result = window.__readaloud.buildIndex({ scope: "fromSelection" });
 
     expect(result.text.startsWith("Local text to speech")).toBe(true);
     expect(result.startWordIndex).toBeGreaterThan(0);
     expect(result.wordCount).toBe(window.__readaloud.words.length - result.startWordIndex);
+  });
+
+  it("limits the text and word count to the selected words for scope selection", () => {
+    pageWith(article());
+    window.__readaloud.buildIndex();
+    const words = window.__readaloud.words;
+    const first = words.findIndex((word) => word.node.parentElement.id === "p2");
+    const last = first + 2;
+
+    const range = document.createRange();
+    range.setStart(words[first].node, words[first].start);
+    range.setEnd(words[last].node, words[last].end);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    const result = window.__readaloud.buildIndex({ scope: "selection" });
+
+    expect(result.startWordIndex).toBe(first);
+    expect(result.wordCount).toBe(3);
+    expect(result.text.split(/\s+/)).toEqual(words.slice(first, last + 1).map((w) => w.text));
   });
 
   it("returns an outside-article error when the selection sits in content Readability dropped", () => {
@@ -205,7 +226,7 @@ describe("buildIndex from a selection", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    expect(window.__readaloud.buildIndex({ fromSelection: true })).toEqual({
+    expect(window.__readaloud.buildIndex({ scope: "fromSelection" })).toEqual({
       error: "outside-article",
     });
   });

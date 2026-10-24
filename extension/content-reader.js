@@ -172,9 +172,9 @@
     return words;
   }
 
-  function joinWords(words, from) {
+  function joinWords(words, from, to) {
     let text = "";
-    for (let index = from; index < words.length; index++) {
+    for (let index = from; index <= to; index++) {
       if (index > from) text += words[index].breakBefore ? "\n\n" : " ";
       text += words[index].text;
     }
@@ -190,24 +190,41 @@
   }
 
   /**
-   * Index of the first word the selection touches. Returns 0 when there is no
-   * selection, or -1 when a selection exists but touches no indexed word
-   * (e.g. it sits inside content Readability dropped, like a footer or nav).
+   * Inclusive index range of the words the selection touches. Returns null
+   * when there is no selection, or {start: -1, end: -1} when a selection
+   * exists but touches no indexed word (e.g. it sits inside content
+   * Readability dropped, like a footer or nav).
    */
-  function selectionStartIndex(words) {
+  function selectionWordRange(words) {
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return 0;
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
 
     const selected = selection.getRangeAt(0);
+    let start = -1;
+    let end = -1;
     for (let index = 0; index < words.length; index++) {
       const range = rangeFor(words[index]);
+      if (!range) continue;
       // END_TO_START compares the selection's start against the word's end:
       // negative means this word is still running when the selection begins.
-      if (range && selected.compareBoundaryPoints(Range.END_TO_START, range) < 0) {
-        return index;
+      if (start === -1 && selected.compareBoundaryPoints(Range.END_TO_START, range) < 0) {
+        start = index;
       }
+      // START_TO_END compares the selection's end against the word's start:
+      // positive means this word begins before the selection ends.
+      if (selected.compareBoundaryPoints(Range.START_TO_END, range) > 0) end = index;
     }
-    return -1;
+    return start === -1 || end < start ? { start: -1, end: -1 } : { start, end };
+  }
+
+  /** First/last word index to read for `scope`; start is -1 for an unmatched selection. */
+  function scopeBounds(words, scope) {
+    const last = words.length - 1;
+    if (scope === "page") return { start: 0, end: last };
+    const selected = selectionWordRange(words);
+    if (!selected) return { start: 0, end: last };
+    if (scope === "fromSelection") return { start: selected.start, end: last };
+    return selected;
   }
 
   function ensureStyle() {
@@ -237,9 +254,9 @@
     /**
      * Extract the article and index its words against the live DOM.
      *
-     * @param {{fromSelection?: boolean}} options When fromSelection is true,
-     *   the returned text starts at the first word the current selection
-     *   touches.
+     * @param {{scope?: "page" | "fromSelection" | "selection"}} options
+     *   "fromSelection" starts the returned text at the first word the current
+     *   selection touches; "selection" also ends it at the last word touched.
      * @returns {{title: string, text: string, wordCount: number,
      *   startWordIndex: number} | {error: "no-article" | "outside-article"}}
      *   "no-article" means Readability found nothing extractable on the page;
@@ -247,7 +264,7 @@
      *   word (e.g. it sits in content Readability dropped, like a footer,
      *   nav, or a separate content block an ad split off from the rest).
      */
-    buildIndex({ fromSelection = false } = {}) {
+    buildIndex({ scope = "page" } = {}) {
       stampAll();
       try {
         const parsed = parseArticle();
@@ -257,12 +274,12 @@
         if (!words.length) return { error: "no-article" };
         state.words = words;
 
-        const startWordIndex = fromSelection ? selectionStartIndex(words) : 0;
+        const { start: startWordIndex, end: endWordIndex } = scopeBounds(words, scope);
         if (startWordIndex === -1) return { error: "outside-article" };
         return {
           title: parsed.title,
-          text: joinWords(words, startWordIndex),
-          wordCount: words.length - startWordIndex,
+          text: joinWords(words, startWordIndex, endWordIndex),
+          wordCount: endWordIndex - startWordIndex + 1,
           startWordIndex,
         };
       } finally {

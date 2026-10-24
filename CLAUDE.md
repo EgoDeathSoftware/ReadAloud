@@ -79,8 +79,8 @@ pnpm preview                     # Preview production build
   finishes. `TtsStatusResponse.cues` remains the stitched-timeline list the web frontend uses.
 - In the extension, `content-reader.js` indexes article words to live DOM ranges, the
   background page polls the player every 100 ms and messages the tab, and the tab paints one
-  word via the CSS Custom Highlight API. Highlighting covers "Read Page" and "Read From
-  Here"; selections and PDFs play with audio only.
+  word via the CSS Custom Highlight API. Highlighting covers "Read Page", "Read Selection"
+  and "Read From Here"; PDFs, and selections outside the extracted article, play with audio only.
 
 ### Extension (`extension/`)
 

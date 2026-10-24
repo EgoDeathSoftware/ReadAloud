@@ -247,11 +247,11 @@ async function handleReadRequest(text, voice, speed, highlightTarget = null) {
 // Inject Readability.js first (defines the global), then the reader, then ask
 // it to index the page. The word index stays in the tab -- only plain data
 // crosses back.
-async function buildPageIndex(tab, { fromSelection = false } = {}) {
+async function buildPageIndex(tab, scope = "page") {
   await browser.tabs.executeScript(tab.id, { file: "Readability.js" });
   await browser.tabs.executeScript(tab.id, { file: "content-reader.js" });
   const results = await browser.tabs.executeScript(tab.id, {
-    code: `window.__readaloud.buildIndex({ fromSelection: ${fromSelection} })`,
+    code: `window.__readaloud.buildIndex({ scope: "${scope}" })`,
   });
   const article = results && results[0];
   if (!article || (!article.error && (!article.text || article.text.trim().length === 0))) {
@@ -300,7 +300,7 @@ async function handleReadFromHere(tab, voice, speed) {
   setPhase("extracting");
 
   try {
-    const article = await buildPageIndex(tab, { fromSelection: true });
+    const article = await buildPageIndex(tab, "fromSelection");
     if (article.error) {
       setError(EXTRACTION_ERROR_MESSAGES[article.error]);
       return;
@@ -313,6 +313,37 @@ async function handleReadFromHere(tab, voice, speed) {
     });
   } catch (err) {
     setError(`Extraction failed: ${err.message}`);
+  }
+}
+
+// Highlights the selection when it lies inside the extracted article; a selection the
+// article doesn't cover (or a page with no article) still plays, audio only.
+async function handleReadSelection(tab, voice, speed) {
+  stopAll();
+  setPhase("extracting");
+
+  try {
+    const article = await buildPageIndex(tab, "selection");
+    if (!article.error) {
+      await handleReadRequest(article.text, voice, speed, {
+        tabId: tab.id,
+        wordOffset: article.startWordIndex,
+        wordCount: article.wordCount,
+      });
+      return;
+    }
+
+    const results = await browser.tabs.executeScript(tab.id, {
+      code: "window.getSelection().toString();",
+    });
+    const text = results && results[0];
+    if (!text || text.trim().length === 0) {
+      setError("No text selected on this page");
+      return;
+    }
+    await handleReadRequest(text, voice, speed);
+  } catch (err) {
+    setError(`Could not read selection: ${err.message}`);
   }
 }
 
@@ -396,7 +427,7 @@ browser.contextMenus.create({
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const settings = await loadSettings();
   if (info.menuItemId === "readaloud-selection" && info.selectionText) {
-    handleReadRequest(info.selectionText, settings.defaultVoice, settings.defaultSpeed);
+    handleReadSelection(tab, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-from-here" && info.selectionText && tab.id) {
     handleReadFromHere(tab, settings.defaultVoice, settings.defaultSpeed);
   } else if (info.menuItemId === "readaloud-page" && tab.id) {
@@ -414,17 +445,7 @@ browser.runtime.onMessage.addListener((message) => {
         .query({ active: true, currentWindow: true })
         .then((tabs) => {
           if (!tabs[0]) throw new Error("No active tab");
-          return browser.tabs.executeScript(tabs[0].id, {
-            code: "window.getSelection().toString();",
-          });
-        })
-        .then((results) => {
-          const text = results && results[0];
-          if (!text || text.trim().length === 0) {
-            setError("No text selected on this page");
-            return;
-          }
-          handleReadRequest(text, message.voice, message.speed);
+          handleReadSelection(tabs[0], message.voice, message.speed);
         })
         .catch((err) => setError(`Could not read selection: ${err.message}`));
 
