@@ -3,9 +3,11 @@
 const statusDot = document.getElementById("status-dot");
 const statusText = document.getElementById("status-text");
 const voiceSelect = document.getElementById("voice-select");
+const highlightToggle = document.getElementById("highlight-toggle");
 const speedRange = document.getElementById("speed-range");
 const speedValue = document.getElementById("speed-value");
 const btnSelection = document.getElementById("btn-selection");
+const btnFromHere = document.getElementById("btn-from-here");
 const btnPage = document.getElementById("btn-page");
 const btnPause = document.getElementById("btn-pause");
 const btnStop = document.getElementById("btn-stop");
@@ -52,6 +54,7 @@ function renderState(s) {
 
   const isActive = !["idle", "error"].includes(s.phase);
   btnSelection.disabled = isActive;
+  btnFromHere.disabled = isActive;
   btnPage.disabled = isActive;
   transportSection.classList.toggle("hidden", s.phase !== "playing" && s.phase !== "paused");
   btnPause.textContent = s.phase === "paused" ? "▶" : "❚❚";
@@ -84,6 +87,10 @@ async function loadVoices() {
     const voices = await browser.runtime.sendMessage({ type: "getVoices" });
     if (voices && !voices.error && Array.isArray(voices)) {
       voiceSelect.innerHTML = "";
+      const defaultOpt = document.createElement("option");
+      defaultOpt.value = "";
+      defaultOpt.textContent = "Default";
+      voiceSelect.appendChild(defaultOpt);
       for (const v of voices) {
         const opt = document.createElement("option");
         opt.value = v.id;
@@ -91,7 +98,7 @@ async function loadVoices() {
         voiceSelect.appendChild(opt);
       }
       const saved = await browser.storage.local.get("defaultVoice");
-      if (saved.defaultVoice) {
+      if (voices.some((v) => v.id === saved.defaultVoice)) {
         voiceSelect.value = saved.defaultVoice;
       }
     }
@@ -106,6 +113,11 @@ async function loadSpeed() {
     speedRange.value = saved.defaultSpeed;
     speedValue.textContent = parseFloat(saved.defaultSpeed).toFixed(1);
   }
+}
+
+async function loadHighlight() {
+  const saved = await browser.storage.local.get("highlightEnabled");
+  highlightToggle.checked = saved.highlightEnabled !== false;
 }
 
 async function checkServer() {
@@ -134,6 +146,10 @@ speedRange.addEventListener("change", () => {
   browser.storage.local.set({ defaultSpeed: parseFloat(speedRange.value) });
 });
 
+highlightToggle.addEventListener("change", () => {
+  browser.storage.local.set({ highlightEnabled: highlightToggle.checked });
+});
+
 voiceSelect.addEventListener("change", () => {
   browser.storage.local.set({ defaultVoice: voiceSelect.value });
 });
@@ -141,6 +157,14 @@ voiceSelect.addEventListener("change", () => {
 btnSelection.addEventListener("click", () => {
   browser.runtime.sendMessage({
     type: "readSelection",
+    voice: getVoice(),
+    speed: getSpeed(),
+  });
+});
+
+btnFromHere.addEventListener("click", () => {
+  browser.runtime.sendMessage({
+    type: "readFromHere",
     voice: getVoice(),
     speed: getSpeed(),
   });
@@ -183,7 +207,7 @@ browser.runtime.onMessage.addListener((message) => {
 
 // Initialize
 (async () => {
-  await Promise.all([loadVoices(), loadSpeed(), checkServer()]);
+  await Promise.all([loadVoices(), loadSpeed(), loadHighlight(), checkServer()]);
   const currentState = await browser.runtime.sendMessage({ type: "getState" });
   renderState(currentState);
 })();

@@ -20,6 +20,7 @@ export function AudioPlayer({
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [volume, setVolume] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
   const activeCueRef = useRef<number | null>(null);
 
@@ -39,7 +40,13 @@ export function AudioPlayer({
     if (audioRef.current) {
       audioRef.current.playbackRate = playbackRate;
     }
-  }, [playbackRate]);
+  }, [playbackRate, audioUrl]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume, audioUrl]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -98,6 +105,7 @@ export function AudioPlayer({
         className="audio-player__element"
         controls
         src={audioUrl}
+        onVolumeChange={(e) => setVolume(e.currentTarget.volume)}
         onPlay={() => {
           setIsPlaying(true);
           onPlayingChange?.(true);
@@ -150,6 +158,23 @@ export function AudioPlayer({
             </button>
           ))}
         </div>
+      </div>
+      <div className="audio-player__volume">
+        <label className="audio-player__speed-label" htmlFor="audio-volume">
+          Volume
+        </label>
+        <input
+          id="audio-volume"
+          className="audio-player__volume-slider"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+          aria-valuetext={`${Math.round(volume * 100)}%`}
+        />
+        <span className="audio-player__volume-value">{Math.round(volume * 100)}%</span>
       </div>
     </div>
   );

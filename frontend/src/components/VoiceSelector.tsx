@@ -50,6 +50,9 @@ export function VoiceSelector({
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled || loading}
         >
+          {!voices.some((v) => v.id === value) && value && (
+            <option value={value}>{value}</option>
+          )}
           {voices.map((v) => (
             <option key={v.id} value={v.id}>
               {v.name ?? v.id}

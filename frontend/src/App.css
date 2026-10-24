@@ -331,6 +331,24 @@ body {
   color: #ffffff;
 }
 
+.audio-player__volume {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.audio-player__volume-slider {
+  flex: 1;
+  max-width: 14rem;
+  accent-color: var(--primary);
+}
+
+.audio-player__volume-value {
+  min-width: 2.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 /* Generation Progress */
 .generation-progress {
   display: flex;

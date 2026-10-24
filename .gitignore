@@ -16,3 +16,8 @@ dist/
 # Agent tooling
 .agent/
 .claude/
+
+# Local tooling
+.playwright-mcp/
+.Trash-*/
+opencode.json
