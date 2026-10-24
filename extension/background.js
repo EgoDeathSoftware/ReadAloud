@@ -228,8 +228,9 @@ async function handleReadRequest(text, voice, speed, highlightTarget = null) {
 
   try {
     setPhase("playing");
-    if (highlightTarget) startHighlighting(highlightTarget);
-    await player.play(highlightTarget ? captureCues(generator) : generator);
+    const highlighting = highlightTarget && settings.highlightEnabled;
+    if (highlighting) startHighlighting(highlightTarget);
+    await player.play(highlighting ? captureCues(generator) : generator);
     if (state.phase !== "error") {
       resetState();
       broadcastState();
@@ -435,6 +436,15 @@ browser.runtime.onMessage.addListener((message) => {
           handleReadPage(tabs[0], message.voice, message.speed);
         })
         .catch((err) => setError(`Could not read page: ${err.message}`));
+
+    case "readFromHere":
+      return browser.tabs
+        .query({ active: true, currentWindow: true })
+        .then((tabs) => {
+          if (!tabs[0]) throw new Error("No active tab");
+          handleReadFromHere(tabs[0], message.voice, message.speed);
+        })
+        .catch((err) => setError(`Could not read from selection: ${err.message}`));
 
     case "setSpeed":
       player.setSpeed(message.speed);

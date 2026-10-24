@@ -102,6 +102,13 @@ header h1 {
   cursor: pointer;
 }
 
+.controls label.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   gap: 8px;

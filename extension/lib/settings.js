@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   directModel: "kokoro",
   defaultVoice: "",
   defaultSpeed: 1.0,
+  highlightEnabled: true,
 });
 
 const KEYS = Object.keys(DEFAULT_SETTINGS);
