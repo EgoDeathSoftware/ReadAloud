@@ -109,6 +109,12 @@ header h1 {
   cursor: pointer;
 }
 
+.controls .note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .actions {
   display: flex;
   gap: 8px;

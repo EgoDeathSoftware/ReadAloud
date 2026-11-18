@@ -116,24 +116,25 @@ async function loadSpeed() {
 }
 
 async function loadHighlight() {
-  const saved = await browser.storage.local.get("highlightEnabled");
+  const saved = await browser.storage.local.get(["highlightEnabled", "ttsTarget"]);
   highlightToggle.checked = saved.highlightEnabled !== false;
+
+  const direct = saved.ttsTarget === "direct";
+  document.getElementById("highlight-note").classList.toggle("hidden", !direct);
 }
 
 async function checkServer() {
+  const { ttsTarget } = await browser.storage.local.get("ttsTarget");
+  const name = ttsTarget === "direct" ? "OpenAI-compatible endpoint" : "ReadAloud backend";
+  let healthy = false;
   try {
     const result = await browser.runtime.sendMessage({ type: "healthCheck" });
-    if (result && result.status === "healthy") {
-      serverDot.className = "dot dot-connected";
-      serverText.textContent = "Server connected";
-    } else {
-      serverDot.className = "dot dot-disconnected";
-      serverText.textContent = "Server unreachable";
-    }
+    healthy = result?.status === "healthy";
   } catch (_) {
-    serverDot.className = "dot dot-disconnected";
-    serverText.textContent = "Server unreachable";
+    // Treated as unreachable.
   }
+  serverDot.className = healthy ? "dot dot-connected" : "dot dot-disconnected";
+  serverText.textContent = `${name}: ${healthy ? "connected" : "unreachable"}`;
 }
 
 speedRange.addEventListener("input", () => {
