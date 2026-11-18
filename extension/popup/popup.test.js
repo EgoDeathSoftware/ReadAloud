@@ -60,6 +60,24 @@ describe("popup", () => {
     expect(browser.runtime.sendMessage).toHaveBeenCalledWith({ type: "pause" });
   });
 
+  it("shows which tab is being read and switches to it on request", async () => {
+    const tab = { id: 7, windowId: 3, title: "An Article" };
+    openPopup({ getState: { ...IDLE, phase: "playing", tab } });
+    await vi.waitFor(() => expect(byId("reading-title").textContent).toBe("An Article"));
+    expect(byId("reading-section").classList.contains("hidden")).toBe(false);
+
+    byId("btn-show-tab").click();
+
+    expect(browser.runtime.sendMessage).toHaveBeenCalledWith({ type: "showReadingTab" });
+  });
+
+  it("hides the reading tab line when nothing is being read", async () => {
+    openPopup({ getState: { ...IDLE, tab: null } });
+    await vi.waitFor(() => expect(byId("status-text").textContent).toBe("Idle"));
+
+    expect(byId("reading-section").classList.contains("hidden")).toBe(true);
+  });
+
   it("shows playback controls while the server check is still pending", async () => {
     openPopup({ getState: { ...IDLE, phase: "playing" }, getVoices: never, healthCheck: never });
 
