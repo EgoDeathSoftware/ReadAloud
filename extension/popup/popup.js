@@ -24,6 +24,8 @@ const serverDot = document.getElementById("server-dot");
 const serverText = document.getElementById("server-text");
 const btnSettings = document.getElementById("btn-settings");
 
+let currentPhase = "idle";
+
 function getVoice() {
   return voiceSelect.value || undefined;
 }
@@ -43,6 +45,7 @@ function renderState(s) {
     error: "Error",
   };
 
+  currentPhase = s.phase;
   statusText.textContent = phaseLabels[s.phase] || s.phase;
 
   statusDot.className = "dot";
@@ -179,8 +182,7 @@ btnPage.addEventListener("click", () => {
 });
 
 btnPause.addEventListener("click", () => {
-  const isPaused = btnPause.textContent === "Resume";
-  browser.runtime.sendMessage({ type: isPaused ? "resume" : "pause" });
+  browser.runtime.sendMessage({ type: currentPhase === "paused" ? "resume" : "pause" });
 });
 
 btnStop.addEventListener("click", () => {
@@ -205,9 +207,10 @@ browser.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Initialize
-(async () => {
-  await Promise.all([loadVoices(), loadSpeed(), loadHighlight(), checkServer()]);
-  const currentState = await browser.runtime.sendMessage({ type: "getState" });
-  renderState(currentState);
-})();
+// Playback state first: the voice list and server check go over the network
+// and must not hold back the transport controls for a read already playing.
+browser.runtime.sendMessage({ type: "getState" }).then(renderState);
+loadVoices();
+loadSpeed();
+loadHighlight();
+checkServer();
