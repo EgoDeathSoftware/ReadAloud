@@ -4,12 +4,16 @@
  * Exactly one chunk of lookahead: the generator is asked for chunk N+1 as
  * soon as chunk N starts playing, so synthesis overlaps playback without
  * buffering the whole article in memory.
+ *
+ * One stream owns the audio element at a time. `stop()` or a new `play()`
+ * bumps `generation`, so an older play() loop -- possibly still waiting on a
+ * chunk its generator hasn't aborted -- exits without touching the element.
  */
 export function createPlayer({ audioElement } = {}) {
   const audio = audioElement || new Audio();
   let currentUrl = null;
   let phase = "idle";
-  let stopped = false;
+  let generation = 0;
   let settleCurrent = null;
   let rate = 1.0;
   let chunkIndex = -1;
@@ -43,21 +47,32 @@ export function createPlayer({ audioElement } = {}) {
     phase = "idle";
   }
 
+  /** End the current stream: silence the element and let its play() return. */
+  function abandonCurrent() {
+    generation += 1;
+    audio.pause();
+    const settle = settleCurrent;
+    teardown();
+    settle?.();
+  }
+
   return {
     get phase() {
       return phase;
     },
 
     async play(generator) {
-      stopped = false;
+      abandonCurrent();
+      const ownGeneration = generation;
+      const isCurrent = () => ownGeneration === generation;
       phase = "playing";
       const iterator = generator[Symbol.asyncIterator]();
       let pending = iterator.next();
 
       try {
-        while (!stopped) {
+        while (isCurrent()) {
           const { value, done } = await pending;
-          if (done || stopped) break;
+          if (done || !isCurrent()) break;
           chunkIndex = value.index;
           pending = iterator.next();
           await playBlob(value.audio);
@@ -66,7 +81,7 @@ export function createPlayer({ audioElement } = {}) {
         // Swallow the abandoned lookahead so it cannot surface as an
         // unhandled rejection after stop().
         Promise.resolve(pending).catch(() => {});
-        teardown();
+        if (isCurrent()) teardown();
       }
     },
 
@@ -104,9 +119,7 @@ export function createPlayer({ audioElement } = {}) {
     },
 
     stop() {
-      stopped = true;
-      audio.pause();
-      settleCurrent?.();
+      abandonCurrent();
     },
   };
 }
