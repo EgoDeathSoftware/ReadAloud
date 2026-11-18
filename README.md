@@ -14,9 +14,33 @@ A web application that converts text and web content to spoken audio using an Op
 
 - A running OpenAI-compatible TTS server **or** Docker with NVIDIA drivers (for local GPU mode)
 
-## Docker (recommended)
+## Quickstart
 
-All modes build the app and serve it at `http://localhost:8055`.
+Start a [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server, then pull ReadAloud and
+point it at Kokoro:
+
+```bash
+docker pull ghcr.io/remsky/kokoro-fastapi-cpu:latest
+docker pull egodeathsoftware/readaloud:latest
+
+docker run -d --name kokoro -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+docker run -d --name readaloud -p 8055:8000 \
+  -e READALOUD_TTS_BASE_URL=http://host.docker.internal:8880 \
+  egodeathsoftware/readaloud:latest
+```
+
+Configure the extension to use the configured Readaloud backend
+
+Open `http://localhost:8055`.
+
+- **NVIDIA GPU:** use `ghcr.io/remsky/kokoro-fastapi-gpu:latest` and add `--gpus all` to the Kokoro
+  `docker run` (requires the NVIDIA Container Toolkit).
+- **Linux:** add `--add-host=host.docker.internal:host-gateway` to the ReadAloud `docker run` so it
+  can reach Kokoro on the host.
+- **Hosted provider (e.g. OpenAI):** skip Kokoro and set `READALOUD_TTS_BASE_URL`,
+  `READALOUD_TTS_API_KEY`, `READALOUD_TTS_MODEL` and `READALOUD_TTS_DEFAULT_VOICE` instead.
+
+
 
 ### Remote TTS
 
