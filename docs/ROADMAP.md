@@ -7,6 +7,52 @@ Line references are to the state of the tree at the time of review and may drift
 
 ## Bugs
 
+### High priority: extension issues from daily use (reported 2026-11-17, investigated same day)
+
+1. **No tab indicator for which tab is being read.** With several tabs open there is no way to tell
+   which one is producing audio.
+2. **Popup UI out of sync with playback.** The popup sometimes doesn't know anything is being read,
+   so stop / pause / fast-forward can't be used on the page that is playing.
+3. **Audio keeps playing after the source tab is closed.** Closing the tab should stop playback
+   and clear the background page's reading state.
+4. **Popup stuck on "Checking server..." for too long.** Happens intermittently.
+
+Root causes (from code reading and timing measurements; not yet reproduced in Firefox):
+
+- **1 and 3: the background page doesn't track which tab owns a read.** Audio plays in the
+  background page, so Firefox never shows its speaker icon on the source tab. The only tab id kept
+  is `highlight.tabId`, set only while highlighting, never for PDFs or audio-only selections.
+  Nothing listens to `tabs.onRemoved`.
+- **2a: Resume never fires from the popup.** `popup.js` decides pause vs. resume with
+  `btnPause.textContent === "Resume"`, but since f229a04 the label is `▶`/`❚❚`, so it always
+  sends `pause`.
+- **2b: the popup asks for state last.** Its init awaits `getVoices` and `healthCheck` (network)
+  before `getState`, showing the static "Idle" HTML until then: ~20 ms idle, 200–600 ms while
+  Kokoro is synthesizing, up to 10 s if the TTS server times out (two 5 s calls in `/api/voices`).
+- **2c: stale reads can corrupt the current read.** `state`, `player`, `abortController` and
+  `highlight` are module-level and shared, and nothing marks a read as superseded. If a new read
+  starts or Stop is pressed while an old read is at an await that the abort signal doesn't cancel
+  (`buildPageIndex`, `openai.js` `listVoices`), the old read keeps going when that await returns.
+  It can then start playing after Stop, reset state to idle, null the new read's
+  `abortController`, or run `player.teardown()`. That teardown drops the new read's `onended`, so
+  the new read hangs in "playing".
+- **4: the footer waits on a chain with no overall timeout.** The chain is popup → background
+  `healthCheck` → extension `fetch(/api/health)` (no timeout) → backend → Kokoro `/v1/models`
+  (httpx 5 s timeout on each phase). Measured from Windows: ~0.1 s when idle. During a job
+  Kokoro's `/v1/models` blocks ~1.1 s once per chunk; the backend's own event loop stays
+  responsive. With three abandoned jobs still running it reaches 2.4 s. No measured path gets
+  to "way too long", so the remaining suspect is a stalled connection. The extension fetch has
+  no timeout, so Firefox's own network timeouts (90–300 s) then decide how long the popup waits.
+  Not reproduced. Related: stopping or replacing a read never cancels its backend job. Every
+  remaining chunk is still synthesized, and with three abandoned jobs a new read's first chunk
+  took 16.4 s instead of ~6 s.
+
+Items 1–3 are fixed on branch `fix/extension-read-session` (2026-11-17). They pass unit tests but
+are not yet merged or tested in Firefox. Each read is now a session tied to its tab; closing or
+navigating that tab stops it; the tab gets a ▶ badge and the popup shows its title with a "Go to
+tab" button. Resume works and the popup renders state before its server checks. Stale reads are
+discarded, and the player guards against an old stream. Item 4 is waiting on more data from use.
+
 ### Fixed on 2026-08-25
 
 - **Speed applies twice in the web app** — the web app no longer sends `speed` at generation time;
