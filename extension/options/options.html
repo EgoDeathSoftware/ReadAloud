@@ -27,12 +27,16 @@
     </div>
 
     <div class="field hidden" id="direct-fields">
-      <label for="direct-url">Endpoint URL</label>
-      <input type="url" id="direct-url" placeholder="http://localhost:8880">
+      <label for="direct-url">Endpoint URL (leave off /v1/)</label>
+      <input type="url" id="direct-url" placeholder="https://api.openai.com">
       <label for="direct-model">Model</label>
       <input type="text" id="direct-model" placeholder="kokoro">
       <label for="direct-api-key">API Key (leave blank for Kokoro)</label>
       <input type="password" id="direct-api-key" autocomplete="off" placeholder="sk-...">
+      <label class="radio">
+        <input type="checkbox" id="show-api-key">
+        Show API key
+      </label>
     </div>
 
     <div class="field">

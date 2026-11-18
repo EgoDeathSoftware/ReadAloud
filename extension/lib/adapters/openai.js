@@ -114,17 +114,22 @@ export const openaiAdapter = {
         const response = await fetch(`${settings.directUrl}${path}`, {
           headers: headers(settings),
         });
-        if (response.status < 500) {
-          return { ok: true, detail: `Reachable (${path})` };
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, detail: "Invalid or missing API key" };
         }
+        if (response.ok) return { ok: true, detail: `Reachable (${path})` };
       } catch {
         // Try the next probe.
       }
     }
-    return { ok: false, detail: "TTS server unreachable" };
+    if (/\/v1$/.test(settings.directUrl)) {
+      return { ok: false, detail: "Endpoint URL should not end in /v1" };
+    }
+    return { ok: false, detail: "TTS server unreachable or not responding on /health or /v1/models" };
   },
 
-  async *synthesize({ text, voice, settings, signal, onProgress }) {
+  async *synthesize({ text, voice: requestedVoice, settings, signal, onProgress }) {
+    const voice = requestedVoice || (await this.listVoices(settings))[0].id;
     const chunks = chunkText(text, MAX_INPUT_CHARS);
     const total = chunks.length;
     onProgress({ chunksCompleted: 0, chunksTotal: total, progress: 0 });

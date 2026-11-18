@@ -89,6 +89,10 @@ for (const input of [backendUrlInput, directUrlInput, directApiKeyInput, directM
   input.addEventListener("change", () => refreshVoices(voiceSelect.value));
 }
 
+document.getElementById("show-api-key").addEventListener("change", (event) => {
+  directApiKeyInput.type = event.target.checked ? "text" : "password";
+});
+
 speedRange.addEventListener("input", () => {
   speedValue.textContent = parseFloat(speedRange.value).toFixed(1);
 });
