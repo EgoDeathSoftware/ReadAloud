@@ -50,6 +50,28 @@ describe("buildIndex", () => {
     expect(text).toContain("at all.\n\nLocal text");
   });
 
+  it("reads plain text around inline formatting in div paragraphs", () => {
+    pageWith(`
+      <article>
+        <div>Start with <strong>bold words</strong> then follow <a href="/story">this link</a>
+          to the end.</div>
+        <div>${PARAGRAPH}</div>
+        <div><p>Closing paragraph.</p></div>
+      </article>
+      <footer>Outside the article.</footer>
+    `);
+
+    const { text } = window.__readaloud.buildIndex();
+
+    expect(text.split("\n\n")).toEqual([
+      "Start with bold words then follow this link to the end.",
+      PARAGRAPH,
+      "Closing paragraph.",
+    ]);
+    const firstTextNode = document.querySelector("article div").firstChild;
+    expect(window.__readaloud.words[0].node).toBe(firstTextNode);
+  });
+
   it("excludes navigation and footer text Readability dropped", () => {
     pageWith(article());
 

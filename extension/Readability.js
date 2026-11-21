@@ -1194,6 +1194,11 @@ Readability.prototype = {
             this._getLinkDensity(node) < 0.25
           ) {
             var newNode = node.children[0];
+            // ReadAloud maps text back to the live page using data-ra-id. A
+            // paragraph created above takes the place of its source div.
+            if (!newNode.hasAttribute("data-ra-id") && node.hasAttribute("data-ra-id")) {
+              newNode.setAttribute("data-ra-id", node.getAttribute("data-ra-id"));
+            }
             node.parentNode.replaceChild(newNode, node);
             node = newNode;
             elementsToScore.push(node);
