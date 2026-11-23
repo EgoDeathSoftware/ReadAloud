@@ -23,12 +23,12 @@
 
     <div class="field" id="backend-fields">
       <label for="backend-url">Backend URL (used for PDF extraction, even on direct mode)</label>
-      <input type="url" id="backend-url" placeholder="http://localhost:8000">
+      <input type="url" id="backend-url" placeholder="http://localhost:9000">
     </div>
 
     <div class="field hidden" id="direct-fields">
       <label for="direct-url">Endpoint URL</label>
-      <input type="url" id="direct-url" placeholder="http://localhost:8880">
+      <input type="url" id="direct-url" placeholder="http://localhost:9880">
       <label for="direct-model">Model</label>
       <input type="text" id="direct-model" placeholder="kokoro">
       <label for="direct-api-key">API Key (leave blank for Kokoro)</label>
@@ -37,9 +37,12 @@
 
     <div class="field">
       <label for="voice-select">Default Voice</label>
-      <select id="voice-select">
-        <option value="">Loading voices...</option>
-      </select>
+      <div class="voice-field">
+        <select id="voice-select">
+          <option value="">Loading voices...</option>
+        </select>
+        <button id="btn-test-voice" class="btn-test-voice">Test</button>
+      </div>
     </div>
 
     <div class="field">

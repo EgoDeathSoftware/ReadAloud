@@ -129,6 +129,29 @@ export const openaiAdapter = {
     return { ok: false, detail: "TTS server unreachable" };
   },
 
+  async testVoice(voice, settings, signal) {
+    const url = `${settings.directUrl}/v1/audio/speech`;
+    const body = JSON.stringify({
+      model: settings.directModel || "kokoro",
+      input: "Hello, this is a test of your voice.",
+      voice,
+      response_format: "mp3",
+    });
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: headers(settings, { "Content-Type": "application/json" }),
+      body,
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(await describeError(response));
+    }
+
+    return response.blob();
+  },
+
   async *synthesize({ text, voice, settings, signal, onProgress }) {
     const chunks = chunkText(text, MAX_INPUT_CHARS);
     const total = chunks.length;

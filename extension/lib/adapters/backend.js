@@ -60,6 +60,20 @@ export const backendAdapter = {
     }
   },
 
+  async testVoice(voice, settings, signal) {
+    const body = { text: "Hello, this is a test of your voice." };
+    if (voice) body.voice = voice;
+
+    const job = await backendJson(settings, "/api/tts/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    return fetchAudio(settings, `/api/tts/audio/${job.job_id}`, signal);
+  },
+
   async *synthesize({ text, voice, settings, signal, onProgress, knownChunks = [] }) {
     const body = { text: text.trim() };
     if (voice) body.voice = voice;
