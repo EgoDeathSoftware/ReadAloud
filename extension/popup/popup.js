@@ -183,7 +183,9 @@ browser.runtime.onMessage.addListener((message) => {
 
 // Initialize
 (async () => {
-  await Promise.all([loadVoices(), loadSpeed(), checkServer()]);
+  // Render background state first; server probes must never block the status display.
+  const slowLoads = Promise.all([loadVoices(), loadSpeed(), checkServer()]);
   const currentState = await browser.runtime.sendMessage({ type: "getState" });
   renderState(currentState);
+  await slowLoads;
 })();

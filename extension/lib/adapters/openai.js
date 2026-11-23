@@ -68,6 +68,9 @@ async function describeError(response) {
   return detail;
 }
 
+/** Cap on voice-list and health probes so the popup never waits on a stalled server. */
+const PROBE_TIMEOUT_MS = 5000;
+
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
@@ -95,6 +98,7 @@ export const openaiAdapter = {
     try {
       const response = await fetch(`${settings.directUrl}/v1/audio/voices`, {
         headers: headers(settings),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       if (response.ok) {
         const data = await response.json();
@@ -113,6 +117,7 @@ export const openaiAdapter = {
       try {
         const response = await fetch(`${settings.directUrl}${path}`, {
           headers: headers(settings),
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (response.status < 500) {
           return { ok: true, detail: `Reachable (${path})` };

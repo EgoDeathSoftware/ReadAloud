@@ -1,6 +1,8 @@
 import { chunkCache } from "/lib/chunk-cache.js";
 
 const POLL_INTERVAL_MS = 1000;
+/** Cap on voice-list and health probes so the popup never waits on a stalled server. */
+const PROBE_TIMEOUT_MS = 5000;
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -39,13 +41,17 @@ export const backendAdapter = {
   maxInputChars: Infinity,
 
   async listVoices(settings) {
-    const voices = await backendJson(settings, "/api/voices");
+    const voices = await backendJson(settings, "/api/voices", {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
     return voices.map((v) => ({ id: v.id, name: v.name || v.id }));
   },
 
   async checkHealth(settings) {
     try {
-      const data = await backendJson(settings, "/api/health");
+      const data = await backendJson(settings, "/api/health", {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
       return data.status === "healthy"
         ? { ok: true, detail: "Backend and TTS server reachable" }
         : { ok: false, detail: `Backend up, TTS server ${data.tts_server}` };
