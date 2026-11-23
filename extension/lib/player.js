@@ -1,12 +1,27 @@
 /**
+ * Route an element through Web Audio so output is always stereo.
+ *
+ * TTS servers emit mono MP3. Some output devices (e.g. soundbars) drop a mono
+ * stream played straight from an element; Web Audio upmixes it to the
+ * destination's stereo layout first. Returns null if Web Audio is unavailable.
+ */
+function createStereoContext(audio) {
+  if (typeof AudioContext === "undefined") return null;
+  const context = new AudioContext();
+  context.createMediaElementSource(audio).connect(context.destination);
+  return context;
+}
+
+/**
  * Play a stream of MP3 blobs back to back.
  *
  * Exactly one chunk of lookahead: the generator is asked for chunk N+1 as
  * soon as chunk N starts playing, so synthesis overlaps playback without
  * buffering the whole article in memory.
  */
-export function createPlayer({ audioElement } = {}) {
+export function createPlayer({ audioElement, audioContext } = {}) {
   const audio = audioElement || new Audio();
+  const context = audioContext ?? (audioElement ? null : createStereoContext(audio));
   let currentUrl = null;
   let phase = "idle";
   let stopped = false;
@@ -30,6 +45,7 @@ export function createPlayer({ audioElement } = {}) {
       audio.onerror = () => reject(new Error("Audio playback failed"));
       audio.src = currentUrl;
       audio.playbackRate = rate;
+      context?.resume().catch(() => {});
       audio.play().catch(reject);
     });
   }

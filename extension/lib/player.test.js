@@ -215,3 +215,21 @@ describe("createPlayer", () => {
     await expect(done).rejects.toThrow(/playback failed/i);
   });
 });
+
+describe("createPlayer audio routing", () => {
+  it("resumes an injected audio context before each chunk", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const audioContext = { resume: vi.fn(() => Promise.resolve()) };
+    const player = createPlayer({ audioElement: audio, audioContext });
+
+    const done = player.play(chunks(2));
+    for (let i = 0; i < 2; i++) {
+      await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(i + 1));
+      audio.finish();
+    }
+    await done;
+
+    expect(audioContext.resume).toHaveBeenCalledTimes(2);
+  });
+});
