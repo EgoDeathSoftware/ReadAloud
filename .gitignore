@@ -16,3 +16,4 @@ dist/
 # Agent tooling
 .agent/
 .claude/
+.DS_Store
