@@ -79,7 +79,7 @@ Configure the backend via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `READALOUD_TTS_BASE_URL` | `http://localhost:8880` | TTS server URL |
+| `READALOUD_TTS_BASE_URL` | `http://localhost:9880` | TTS server URL |
 | `READALOUD_TTS_MODEL` | `kokoro` | Model name |
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` | Default voice ID |
 | `READALOUD_TTS_API_KEY` | _(blank)_ | Bearer token for the TTS server. Blank for Kokoro; required for OpenAI/Groq |
@@ -101,7 +101,7 @@ browser. Point it at any OpenAI-compatible server:
 
 | Server | Endpoint URL | Model | API key |
 |---|---|---|---|
-| Kokoro (this repo's compose profiles) | `http://localhost:8880` | `kokoro` | none |
+| Kokoro (this repo's compose profiles) | `http://localhost:9880` | `kokoro` | none |
 | OpenAI | `https://api.openai.com` | `gpt-4o-mini-tts` | required |
 | Groq | `https://api.groq.com/openai` | `playai-tts` | required |
 

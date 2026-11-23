@@ -35,7 +35,7 @@ describe("loadSettings", () => {
   });
 
   it("defaults the direct target to the Kokoro container port", () => {
-    expect(DEFAULT_SETTINGS.directUrl).toBe("http://localhost:8880");
+    expect(DEFAULT_SETTINGS.directUrl).toBe("http://localhost:9880");
     expect(DEFAULT_SETTINGS.ttsTarget).toBe("backend");
   });
 

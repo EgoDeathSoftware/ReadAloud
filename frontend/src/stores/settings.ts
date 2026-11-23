@@ -11,7 +11,7 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
-      tts_base_url: "http://localhost:9000",
+      tts_base_url: "http://localhost:9880",
       tts_model: "kokoro",
       tts_default_voice: "af_heart",
       updateSettings: (partial) => set(partial),
