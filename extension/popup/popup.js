@@ -14,6 +14,9 @@ const btnStop = document.getElementById("btn-stop");
 const btnRewind = document.getElementById("btn-rewind");
 const btnForward = document.getElementById("btn-forward");
 const transportSection = document.getElementById("transport-section");
+const readingSection = document.getElementById("reading-section");
+const readingTitle = document.getElementById("reading-title");
+const btnShowTab = document.getElementById("btn-show-tab");
 const SKIP_SECONDS = 15;
 const progressSection = document.getElementById("progress-section");
 const progressFill = document.getElementById("progress-fill");
@@ -23,6 +26,8 @@ const errorText = document.getElementById("error-text");
 const serverDot = document.getElementById("server-dot");
 const serverText = document.getElementById("server-text");
 const btnSettings = document.getElementById("btn-settings");
+
+let currentPhase = "idle";
 
 function getVoice() {
   return voiceSelect.value || undefined;
@@ -43,6 +48,7 @@ function renderState(s) {
     error: "Error",
   };
 
+  currentPhase = s.phase;
   statusText.textContent = phaseLabels[s.phase] || s.phase;
 
   statusDot.className = "dot";
@@ -56,6 +62,9 @@ function renderState(s) {
   btnSelection.disabled = isActive;
   btnFromHere.disabled = isActive;
   btnPage.disabled = isActive;
+  readingSection.classList.toggle("hidden", !s.tab);
+  readingTitle.textContent = s.tab ? s.tab.title || "Untitled tab" : "";
+  readingTitle.title = readingTitle.textContent;
   transportSection.classList.toggle("hidden", s.phase !== "playing" && s.phase !== "paused");
   btnPause.textContent = s.phase === "paused" ? "▶" : "❚❚";
   btnPause.title = s.phase === "paused" ? "Resume" : "Pause";
@@ -179,8 +188,11 @@ btnPage.addEventListener("click", () => {
 });
 
 btnPause.addEventListener("click", () => {
-  const isPaused = btnPause.textContent === "Resume";
-  browser.runtime.sendMessage({ type: isPaused ? "resume" : "pause" });
+  browser.runtime.sendMessage({ type: currentPhase === "paused" ? "resume" : "pause" });
+});
+
+btnShowTab.addEventListener("click", () => {
+  browser.runtime.sendMessage({ type: "showReadingTab" });
 });
 
 btnStop.addEventListener("click", () => {
@@ -205,9 +217,10 @@ browser.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Initialize
-(async () => {
-  await Promise.all([loadVoices(), loadSpeed(), loadHighlight(), checkServer()]);
-  const currentState = await browser.runtime.sendMessage({ type: "getState" });
-  renderState(currentState);
-})();
+// Playback state first: the voice list and server check go over the network
+// and must not hold back the transport controls for a read already playing.
+browser.runtime.sendMessage({ type: "getState" }).then(renderState);
+loadVoices();
+loadSpeed();
+loadHighlight();
+checkServer();

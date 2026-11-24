@@ -102,7 +102,11 @@ browser and under Vite/vitest.
 - `lib/reading-cues.js` — JS port of `reading_cues.py` for one chunk, used by the direct
   adapter; `lib/cues.js` finds the cue covering a playback time
 - `lib/audio-duration.js` — measures a chunk blob's duration for the cue heuristic
-- `background.js` — orchestration only; owns state and the message API used by the popup
+- `background.js` — orchestration only; owns state and the message API used by the popup.
+  Each read is a `session` tied to its source tab: closing the tab or loading a new document in
+  it (`webNavigation.onCommitted`, top frame) stops the read, the tab gets a ▶ toolbar badge, and
+  the popup shows its title with a "Go to tab" button. A read stopped or replaced while it waited
+  on a non-abortable step is discarded when it resumes (`isCurrent`/`finishRead`).
 
 Both adapters expose `synthesize()` as an async generator yielding `{audio, index, total, cues}`, so the
 player is target-agnostic. Tests: `cd extension && npm test` (vitest).

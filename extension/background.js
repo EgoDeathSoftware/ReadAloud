@@ -14,10 +14,21 @@ const state = {
   chunksCompleted: 0,
   chunksTotal: 0,
   error: null,
+  tab: null,
 };
 
 const player = createPlayer({});
-let abortController = null;
+
+/**
+ * The read in progress: the tab it came from and the controller that cancels
+ * its requests. Extraction and some synthesis steps can't be aborted, so a
+ * read that was stopped or replaced can resume later. It must not touch shared
+ * state when it does: handleReadRequest checks `isCurrent(read)` after each of
+ * its awaits, and finishRead ignores a read that is no longer current.
+ */
+let session = null;
+
+const READING_BADGE = { text: "▶", color: "#2e7d32" };
 
 const HIGHLIGHT_INTERVAL_MS = 100;
 
@@ -128,6 +139,7 @@ function resetState() {
   state.chunksCompleted = 0;
   state.chunksTotal = 0;
   state.error = null;
+  state.tab = null;
   browser.browserAction.setBadgeText({ text: "" });
 }
 
@@ -150,13 +162,58 @@ function setError(message) {
   broadcastState();
 }
 
+/** Set or clear (`null`) the badge shown while `tab` is the active tab. */
+function badgeTab(tab, text, color) {
+  // Rejects when the tab has just closed, and the badge went with it.
+  browser.browserAction.setBadgeText({ tabId: tab.id, text }).catch(() => {});
+  browser.browserAction.setBadgeBackgroundColor({ tabId: tab.id, color }).catch(() => {});
+}
+
 function stopAll() {
-  abortController?.abort();
-  abortController = null;
+  if (session) {
+    session.controller.abort();
+    badgeTab(session.tab, null, null);
+    session = null;
+  }
   player.stop();
   stopHighlighting();
   resetState();
   broadcastState();
+}
+
+/** Stop whatever is playing and start a read of `tab`. */
+function beginRead(tab) {
+  stopAll();
+  const read = {
+    tab: { id: tab.id, windowId: tab.windowId, title: tab.title || "" },
+    controller: new AbortController(),
+  };
+  session = read;
+  state.tab = read.tab;
+  badgeTab(read.tab, READING_BADGE.text, READING_BADGE.color);
+  return read;
+}
+
+function isCurrent(read) {
+  return read === session;
+}
+
+/** End `read` -- unless it was already stopped or replaced -- with an optional error. */
+function finishRead(read, errorMessage = null) {
+  if (!isCurrent(read)) return;
+  badgeTab(read.tab, null, null);
+  session = null;
+  stopHighlighting();
+  resetState();
+  if (errorMessage) setError(errorMessage);
+  else broadcastState();
+}
+
+async function showReadingTab() {
+  if (!session) return;
+  const { id, windowId } = session.tab;
+  await browser.tabs.update(id, { active: true });
+  await browser.windows.update(windowId, { focused: true });
 }
 
 function blobToBase64(blob) {
@@ -191,34 +248,35 @@ async function buildKnownChunks(text, voice, settings, signal) {
   }
 }
 
-async function handleReadRequest(text, voice, speed, highlightTarget = null) {
-  stopAll();
-
+async function handleReadRequest(read, text, voice, speed, highlightTarget = null) {
   if (!text || text.trim().length === 0) {
-    setError("No text to read");
+    finishRead(read, "No text to read");
     return;
   }
 
   const settings = await loadSettings();
+  if (!isCurrent(read)) return;
   const adapter = pickAdapter(settings);
   const resolvedVoice = voice || settings.defaultVoice;
-  abortController = new AbortController();
+  const { signal } = read.controller;
 
   player.setSpeed(speed || settings.defaultSpeed);
   setPhase("generating");
 
   const knownChunks =
     adapter === backendAdapter
-      ? await buildKnownChunks(text, resolvedVoice, settings, abortController.signal)
+      ? await buildKnownChunks(text, resolvedVoice, settings, signal)
       : [];
+  if (!isCurrent(read)) return;
 
   const generator = adapter.synthesize({
     text,
     voice: resolvedVoice,
     settings,
-    signal: abortController.signal,
+    signal,
     knownChunks,
     onProgress: ({ chunksCompleted, chunksTotal, progress }) => {
+      if (!isCurrent(read)) return;
       state.chunksCompleted = chunksCompleted;
       state.chunksTotal = chunksTotal;
       state.progress = progress;
@@ -231,16 +289,10 @@ async function handleReadRequest(text, voice, speed, highlightTarget = null) {
     const highlighting = highlightTarget && settings.highlightEnabled;
     if (highlighting) startHighlighting(highlightTarget);
     await player.play(highlighting ? captureCues(generator) : generator);
-    if (state.phase !== "error") {
-      resetState();
-      broadcastState();
-    }
+    finishRead(read);
   } catch (err) {
-    if (err.name === "AbortError") return;
-    setError(err.message);
-  } finally {
-    abortController = null;
-    stopHighlighting();
+    // A stopped read lands here with an AbortError; finishRead ignores it.
+    finishRead(read, err.message);
   }
 }
 
@@ -269,63 +321,62 @@ const EXTRACTION_ERROR_MESSAGES = {
 };
 
 async function handleReadPage(tab, voice, speed) {
-  stopAll();
+  const read = beginRead(tab);
+  setPhase("extracting");
 
   if (await isPdfTab(tab.url)) {
-    await handleReadPdf(tab, voice, speed);
+    await handleReadPdf(read, tab, voice, speed);
     return;
   }
-
-  setPhase("extracting");
 
   try {
     const article = await buildPageIndex(tab);
     if (article.error) {
-      setError(EXTRACTION_ERROR_MESSAGES[article.error]);
+      finishRead(read, EXTRACTION_ERROR_MESSAGES[article.error]);
       return;
     }
 
-    await handleReadRequest(article.text, voice, speed, {
+    await handleReadRequest(read, article.text, voice, speed, {
       tabId: tab.id,
       wordOffset: article.startWordIndex,
       wordCount: article.wordCount,
     });
   } catch (err) {
-    setError(`Extraction failed: ${err.message}`);
+    finishRead(read, `Extraction failed: ${err.message}`);
   }
 }
 
 async function handleReadFromHere(tab, voice, speed) {
-  stopAll();
+  const read = beginRead(tab);
   setPhase("extracting");
 
   try {
     const article = await buildPageIndex(tab, "fromSelection");
     if (article.error) {
-      setError(EXTRACTION_ERROR_MESSAGES[article.error]);
+      finishRead(read, EXTRACTION_ERROR_MESSAGES[article.error]);
       return;
     }
 
-    await handleReadRequest(article.text, voice, speed, {
+    await handleReadRequest(read, article.text, voice, speed, {
       tabId: tab.id,
       wordOffset: article.startWordIndex,
       wordCount: article.wordCount,
     });
   } catch (err) {
-    setError(`Extraction failed: ${err.message}`);
+    finishRead(read, `Extraction failed: ${err.message}`);
   }
 }
 
 // Highlights the selection when it lies inside the extracted article; a selection the
 // article doesn't cover (or a page with no article) still plays, audio only.
 async function handleReadSelection(tab, voice, speed) {
-  stopAll();
+  const read = beginRead(tab);
   setPhase("extracting");
 
   try {
     const article = await buildPageIndex(tab, "selection");
     if (!article.error) {
-      await handleReadRequest(article.text, voice, speed, {
+      await handleReadRequest(read, article.text, voice, speed, {
         tabId: tab.id,
         wordOffset: article.startWordIndex,
         wordCount: article.wordCount,
@@ -338,12 +389,12 @@ async function handleReadSelection(tab, voice, speed) {
     });
     const text = results && results[0];
     if (!text || text.trim().length === 0) {
-      setError("No text selected on this page");
+      finishRead(read, "No text selected on this page");
       return;
     }
-    await handleReadRequest(text, voice, speed);
+    await handleReadRequest(read, text, voice, speed);
   } catch (err) {
-    setError(`Could not read selection: ${err.message}`);
+    finishRead(read, `Could not read selection: ${err.message}`);
   }
 }
 
@@ -371,10 +422,8 @@ function fetchFileTabBytes(tabId) {
     });
 }
 
-async function handleReadPdf(tab, voice, speed) {
-  setPhase("extracting");
-  abortController = new AbortController();
-  const { signal } = abortController;
+async function handleReadPdf(read, tab, voice, speed) {
+  const { signal } = read.controller;
 
   try {
     const sourceUrl = resolvePdfSourceUrl(tab.url);
@@ -397,14 +446,23 @@ async function handleReadPdf(tab, voice, speed) {
     }
     const { text } = await extractResponse.json();
 
-    await handleReadRequest(text, voice, speed);
+    await handleReadRequest(read, text, voice, speed);
   } catch (err) {
-    if (err.name === "AbortError") return;
-    setError(`Could not read PDF: ${err.message}`);
-  } finally {
-    abortController = null;
+    // A stopped read lands here with an AbortError; finishRead ignores it.
+    finishRead(read, `Could not read PDF: ${err.message}`);
   }
 }
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  if (session?.tab.id === tabId) stopAll();
+});
+
+// Only a new document in the tab's top frame ends the read: history.pushState
+// and #fragment changes fire other webNavigation events and leave the page,
+// and the words being highlighted, in place.
+browser.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
+  if (frameId === 0 && session?.tab.id === tabId) stopAll();
+});
 
 browser.contextMenus.create({
   id: "readaloud-selection",
@@ -488,6 +546,9 @@ browser.runtime.onMessage.addListener((message) => {
     case "skip":
       player.skip(message.seconds);
       return Promise.resolve();
+
+    case "showReadingTab":
+      return showReadingTab();
 
     case "getVoices":
       return loadSettings()

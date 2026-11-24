@@ -136,6 +136,43 @@ header h1 {
   cursor: not-allowed;
 }
 
+.reading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.reading-label {
+  color: #666;
+  flex-shrink: 0;
+}
+
+#reading-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+#btn-show-tab {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #1a1a1a;
+  background: #fff;
+}
+
+#btn-show-tab:hover {
+  background: #f1f5f9;
+}
+
 .transport {
   display: flex;
   gap: 8px;

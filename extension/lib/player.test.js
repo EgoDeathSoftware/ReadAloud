@@ -123,6 +123,57 @@ describe("createPlayer", () => {
     expect(player.phase).toBe("idle");
   });
 
+  it("keeps a stopped stream's late chunk off the element a newer stream is using", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+
+    let releaseLateChunk;
+    const lateChunk = new Promise((resolve) => {
+      releaseLateChunk = resolve;
+    });
+    const stale = (async function* () {
+      yield { audio: new Blob(["old"]), index: 0, total: 2 };
+      await lateChunk;
+      yield { audio: new Blob(["old-late"]), index: 1, total: 2 };
+    })();
+
+    const staleDone = player.play(stale);
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    audio.finish();
+    // Let the stale loop reach its wait on the late chunk before stopping.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    player.stop();
+
+    const freshDone = player.play(chunks(1));
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2));
+    releaseLateChunk();
+    await staleDone;
+
+    audio.finish();
+    await freshDone;
+
+    expect(audio.played).toEqual(["blob:chunk-0", "blob:chunk-1"]);
+    expect(player.phase).toBe("idle");
+  });
+
+  it("settles the previous stream when play() starts another", async () => {
+    setupObjectUrls();
+    const audio = fakeAudio();
+    const player = createPlayer({ audioElement: audio });
+
+    const firstDone = player.play(chunks(3));
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+
+    const secondDone = player.play(chunks(1));
+    await firstDone;
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2));
+    audio.finish();
+    await secondDone;
+
+    expect(audio.played).toEqual(["blob:chunk-0", "blob:chunk-1"]);
+  });
+
   it("skips forward and backward within the current chunk, clamped to bounds", async () => {
     setupObjectUrls();
     const audio = fakeAudio();
