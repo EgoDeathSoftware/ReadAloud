@@ -22,8 +22,8 @@
     </div>
 
     <div class="field" id="backend-fields">
-      <label for="backend-url">Backend URL</label>
-      <input type="url" id="backend-url" placeholder="http://localhost:8000">
+      <label for="backend-url">Backend URL (used for PDF extraction, even on direct mode)</label>
+      <input type="url" id="backend-url" placeholder="http://localhost:9000">
     </div>
 
     <div class="field hidden" id="direct-fields">
@@ -41,9 +41,12 @@
 
     <div class="field">
       <label for="voice-select">Default Voice</label>
-      <select id="voice-select">
-        <option value="">Loading voices...</option>
-      </select>
+      <div class="voice-field">
+        <select id="voice-select">
+          <option value="">Loading voices...</option>
+        </select>
+        <button id="btn-test-voice" class="btn-test-voice">Test</button>
+      </div>
     </div>
 
     <div class="field">

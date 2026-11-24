@@ -2,7 +2,7 @@ services:
   readaloud:
     build: .
     ports:
-      - "8000:8000"
+      - "9000:9000"
     environment:
       READALOUD_TTS_BASE_URL: ${READALOUD_TTS_BASE_URL:-http://kokoro:8880}
       READALOUD_TTS_MODEL: ${READALOUD_TTS_MODEL:-kokoro}
@@ -15,7 +15,7 @@ services:
     image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
     profiles: [local-gpu]
     ports:
-      - "8880:8880"
+      - "9880:8880"
     networks:
       default:
         aliases:
@@ -39,7 +39,7 @@ services:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     profiles: [local-cpu]
     ports:
-      - "8880:8880"
+      - "9880:8880"
     networks:
       default:
         aliases:

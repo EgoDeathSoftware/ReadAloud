@@ -23,9 +23,9 @@ point it at Kokoro:
 docker pull ghcr.io/remsky/kokoro-fastapi-cpu:latest
 docker pull egodeathsoftware/readaloud:latest
 
-docker run -d --name kokoro -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+docker run -d --name kokoro -p 9880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
 docker run -d --name readaloud -p 8055:8000 \
-  -e READALOUD_TTS_BASE_URL=http://host.docker.internal:8880 \
+  -e READALOUD_TTS_BASE_URL=http://host.docker.internal:9880 \
   egodeathsoftware/readaloud:latest
 ```
 
@@ -104,7 +104,7 @@ Configure the backend via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `READALOUD_TTS_BASE_URL` | `http://localhost:8880` | TTS server URL |
+| `READALOUD_TTS_BASE_URL` | `http://localhost:9880` | TTS server URL |
 | `READALOUD_TTS_MODEL` | `kokoro` | Model name |
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` | Default voice ID |
 | `READALOUD_TTS_API_KEY` | _(blank)_ | Bearer token for the TTS server. Blank for Kokoro; required for OpenAI/Groq |
@@ -126,7 +126,7 @@ browser. Point it at any OpenAI-compatible server:
 
 | Server | Endpoint URL | Model | API key |
 |---|---|---|---|
-| Kokoro (this repo's compose profiles) | `http://localhost:8880` | `kokoro` | none |
+| Kokoro (this repo's compose profiles) | `http://localhost:9880` | `kokoro` | none |
 | OpenAI | `https://api.openai.com` | `gpt-4o-mini-tts` | required |
 | Groq | `https://api.groq.com/openai` | `playai-tts` | required |
 

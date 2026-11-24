@@ -8,6 +8,7 @@ const directApiKeyInput = document.getElementById("direct-api-key");
 const backendFields = document.getElementById("backend-fields");
 const directFields = document.getElementById("direct-fields");
 const voiceSelect = document.getElementById("voice-select");
+const btnTestVoice = document.getElementById("btn-test-voice");
 const speedRange = document.getElementById("speed-range");
 const speedValue = document.getElementById("speed-value");
 const btnSave = document.getElementById("btn-save");
@@ -100,11 +101,58 @@ btnSave.addEventListener("click", async () => {
   showMessage("Settings saved.", "success");
 });
 
+let audioElement = null;
+let voiceTestController = null;
+
 btnTest.addEventListener("click", async () => {
   const settings = formSettings();
   const result = await pickAdapter(settings).checkHealth(settings);
   showMessage(result.detail, result.ok ? "success" : "error");
   await refreshVoices(voiceSelect.value);
+});
+
+btnTestVoice.addEventListener("click", async () => {
+  const voice = voiceSelect.value;
+  if (!voice) {
+    showMessage("Please select a voice first.", "error");
+    return;
+  }
+
+  if (voiceTestController) {
+    voiceTestController.abort();
+  }
+  voiceTestController = new AbortController();
+
+  btnTestVoice.textContent = "Loading...";
+  btnTestVoice.disabled = true;
+
+  try {
+    const settings = formSettings();
+    const audioBlob = await pickAdapter(settings).testVoice(voice, settings, voiceTestController.signal);
+
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.remove();
+    }
+
+    audioElement = new Audio(URL.createObjectURL(audioBlob));
+    await audioElement.play();
+
+    audioElement.addEventListener("ended", () => {
+      btnTestVoice.textContent = "Test";
+      btnTestVoice.disabled = false;
+      voiceTestController = null;
+      URL.revokeObjectURL(audioElement.src);
+      audioElement = null;
+    });
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      showMessage(`Test voice failed: ${err.message}`, "error");
+    }
+    btnTestVoice.textContent = "Test";
+    btnTestVoice.disabled = false;
+    voiceTestController = null;
+  }
 });
 
 init();

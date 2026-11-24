@@ -21,3 +21,4 @@ dist/
 .playwright-mcp/
 .Trash-*/
 opencode.json
+.DS_Store

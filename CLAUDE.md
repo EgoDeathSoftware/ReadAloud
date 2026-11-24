@@ -113,7 +113,7 @@ player is target-agnostic. Tests: `cd extension && npm test` (vitest).
 
 ### TTS Server Integration
 
-Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:8880`. Endpoint: `POST /v1/audio/speech` with `{model, input, voice, speed, response_format: "mp3"}`.
+Backend expects an OpenAI-compatible TTS API. Default URL: `http://localhost:9880`. Endpoint: `POST /v1/audio/speech` with `{model, input, voice, speed, response_format: "mp3"}`.
 
 For reading-highlight cues, both the backend and the extension's direct adapter probe Kokoro-FastAPI's
 non-OpenAI `POST /dev/captioned_speech` for real per-word timestamps. A 404 means the configured server
@@ -124,7 +124,7 @@ still gets approximate highlighting.
 
 | Variable | Default |
 |---|---|
-| `READALOUD_TTS_BASE_URL` | `http://localhost:8880` |
+| `READALOUD_TTS_BASE_URL` | `http://localhost:9880` |
 | `READALOUD_TTS_MODEL` | `kokoro` |
 | `READALOUD_TTS_DEFAULT_VOICE` | `af_heart` |
 | `READALOUD_TTS_API_KEY` | _(blank)_ |

@@ -5,12 +5,12 @@ import { chunkCache } from "/lib/chunk-cache.js";
 vi.mock("/lib/audio-duration.js", () => ({ measureDuration: async () => 2 }));
 
 const settings = {
-  directUrl: "http://localhost:8880",
+  directUrl: "http://localhost:9880",
   directApiKey: "",
   directModel: "kokoro",
 };
 
-const directSettings = { directUrl: "http://localhost:8880", directModel: "kokoro" };
+const directSettings = { directUrl: "http://localhost:9880", directModel: "kokoro" };
 
 function captionedResponse(timestamps) {
   return {
@@ -164,7 +164,7 @@ describe("synthesize", () => {
     expect(results.length).toBeGreaterThan(1);
     expect(results[0].audio).toBeInstanceOf(Blob);
     expect(results[0].total).toBe(results.length);
-    expect(calls[0].url).toBe("http://localhost:8880/v1/audio/speech");
+    expect(calls[0].url).toBe("http://localhost:9880/v1/audio/speech");
     expect(calls[0].body).toMatchObject({
       model: "kokoro",
       voice: "af_heart",

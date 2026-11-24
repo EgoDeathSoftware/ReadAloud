@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     model_config = {"env_prefix": "READALOUD_"}
 
-    TTS_BASE_URL: str = "http://localhost:8880"
+    TTS_BASE_URL: str = "http://localhost:9880"
     TTS_MODEL: str = "kokoro"
     TTS_DEFAULT_VOICE: str = "af_heart"
     TTS_API_KEY: str = ""

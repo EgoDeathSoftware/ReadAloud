@@ -20,5 +20,5 @@ RUN uv sync --frozen --no-dev
 COPY backend/src ./src
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
-EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "readaloud.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 9000
+CMD ["uv", "run", "uvicorn", "readaloud.main:app", "--host", "0.0.0.0", "--port", "9000"]
