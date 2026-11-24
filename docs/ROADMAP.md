@@ -47,8 +47,8 @@ Root causes (from code reading and timing measurements; not yet reproduced in Fi
   remaining chunk is still synthesized, and with three abandoned jobs a new read's first chunk
   took 16.4 s instead of ~6 s.
 
-Items 1–3 are fixed on branch `fix/extension-read-session` (2026-11-17). They pass unit tests but
-are not yet merged or tested in Firefox. Each read is now a session tied to its tab; closing or
+Items 1–3 are fixed on branch `fix/extension-read-session` (2026-11-17), merged into master on
+2026-11-24. They pass unit tests but are not yet tested in Firefox. Each read is now a session tied to its tab; closing or
 navigating that tab stops it; the tab gets a ▶ badge and the popup shows its title with a "Go to
 tab" button. Resume works and the popup renders state before its server checks. Stale reads are
 discarded, and the player guards against an old stream. Item 4 is waiting on more data from use.
