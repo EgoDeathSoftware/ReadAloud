@@ -173,6 +173,77 @@ describe("synthesize", () => {
     expect(progress.at(-1)).toMatchObject({ progress: 1 });
   });
 
+  describe("checkHealth", () => {
+    function healthFetch(statuses) {
+      return vi.fn(async (url) => {
+        const path = url.replace(settings.directUrl, "");
+        return { ok: statuses[path] < 400, status: statuses[path] };
+      });
+    }
+
+    it("rejects a bad key even though /health is a 404", async () => {
+      const { openaiAdapter } = await import("./openai.js");
+      globalThis.fetch = healthFetch({ "/health": 404, "/v1/models": 401 });
+
+      const result = await openaiAdapter.checkHealth(settings);
+
+      expect(result).toEqual({ ok: false, detail: "Invalid or missing API key" });
+    });
+
+    it("accepts a valid key via /v1/models", async () => {
+      const { openaiAdapter } = await import("./openai.js");
+      globalThis.fetch = healthFetch({ "/health": 404, "/v1/models": 200 });
+
+      const result = await openaiAdapter.checkHealth(settings);
+
+      expect(result).toEqual({ ok: true, detail: "Reachable (/v1/models)" });
+    });
+
+    it("fails when both probes 404", async () => {
+      const { openaiAdapter } = await import("./openai.js");
+      globalThis.fetch = healthFetch({ "/health": 404, "/v1/models": 404 });
+
+      const result = await openaiAdapter.checkHealth(settings);
+
+      expect(result.ok).toBe(false);
+    });
+
+    it("flags an endpoint URL that ends in /v1", async () => {
+      const { openaiAdapter } = await import("./openai.js");
+      globalThis.fetch = vi.fn(async () => ({ ok: false, status: 404 }));
+
+      const result = await openaiAdapter.checkHealth({
+        ...settings,
+        directUrl: "https://api.openai.com/v1",
+      });
+
+      expect(result).toEqual({ ok: false, detail: "Endpoint URL should not end in /v1" });
+    });
+
+    it("fails on 5xx from both probes", async () => {
+      const { openaiAdapter } = await import("./openai.js");
+      globalThis.fetch = healthFetch({ "/health": 500, "/v1/models": 502 });
+
+      const result = await openaiAdapter.checkHealth(settings);
+
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  it("falls back to the first listed voice when none is chosen", async () => {
+    const { openaiAdapter } = await import("./openai.js");
+    const bodies = [];
+    globalThis.fetch = speechOnlyFetch(async (url, options) => {
+      if (url.endsWith("/v1/audio/voices")) return notFoundResponse();
+      bodies.push(JSON.parse(options.body));
+      return blobResponse("audio");
+    });
+
+    await collect(synth(openaiAdapter, { voice: "" }));
+
+    expect(bodies[0].voice).toBe("alloy");
+  });
+
   it("omits the Authorization header when no key is set", async () => {
     const { openaiAdapter } = await import("./openai.js");
     let seen = null;

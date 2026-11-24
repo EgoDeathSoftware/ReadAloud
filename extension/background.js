@@ -4,7 +4,7 @@ import { chunkCache } from "/lib/chunk-cache.js";
 import { chunkText } from "/lib/chunker.js";
 import { createPlayer } from "/lib/player.js";
 import { sha256Hex } from "/lib/hash.js";
-import { loadSettings } from "/lib/settings.js";
+import { TARGET_DIRECT, loadSettings } from "/lib/settings.js";
 import { isPdfTab, resolvePdfSourceUrl } from "/lib/pdf.js";
 import { findActiveCueIndex } from "/lib/cues.js";
 
@@ -426,12 +426,16 @@ async function handleReadPdf(read, tab, voice, speed) {
   const { signal } = read.controller;
 
   try {
+    const settings = await loadSettings();
+    if (settings.ttsTarget === TARGET_DIRECT) {
+      throw new Error("PDFs need the ReadAloud backend; switch the TTS target in settings");
+    }
+
     const sourceUrl = resolvePdfSourceUrl(tab.url);
     const pdfBytes = sourceUrl.startsWith("file:")
       ? await fetchFileTabBytes(tab.id)
       : await fetchAsBlob(sourceUrl, signal);
 
-    const settings = await loadSettings();
     const form = new FormData();
     form.append("file", pdfBytes, "document.pdf");
 

@@ -14,7 +14,32 @@ A web application that converts text and web content to spoken audio using an Op
 
 - A running OpenAI-compatible TTS server **or** Docker with NVIDIA drivers (for local GPU mode)
 
-## Docker (recommended)
+## Quickstart
+
+Start a [Kokoro](https://github.com/remsky/Kokoro-FastAPI) TTS server, then pull ReadAloud and
+point it at Kokoro:
+
+```bash
+docker pull ghcr.io/remsky/kokoro-fastapi-cpu:latest
+docker pull egodeathsoftware/readaloud:latest
+
+docker run -d --name kokoro -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+docker run -d --name readaloud -p 8055:8000 \
+  -e READALOUD_TTS_BASE_URL=http://host.docker.internal:8880 \
+  egodeathsoftware/readaloud:latest
+```
+
+Open `http://localhost:8055`. To use the Firefox extension with this backend, set its ReadAloud
+backend URL to `http://localhost:8055` in the extension's options.
+
+- **NVIDIA GPU:** use `ghcr.io/remsky/kokoro-fastapi-gpu:latest` and add `--gpus all` to the Kokoro
+  `docker run` (requires the NVIDIA Container Toolkit).
+- **Linux:** add `--add-host=host.docker.internal:host-gateway` to the ReadAloud `docker run` so it
+  can reach Kokoro on the host.
+- **Hosted provider (e.g. OpenAI):** skip Kokoro and set `READALOUD_TTS_BASE_URL`,
+  `READALOUD_TTS_API_KEY`, `READALOUD_TTS_MODEL` and `READALOUD_TTS_DEFAULT_VOICE` instead.
+
+## Docker Compose
 
 All modes build the app and serve it at `http://localhost:8055`.
 
@@ -116,11 +141,9 @@ scripts cannot be injected into — Mozilla blocked this deliberately in Firefox
 reversed it. "Read Page" works around this by re-extracting the PDF server-side; reading a
 selected excerpt does not have a workaround.
 
-**PDF "Read Page" always requires the ReadAloud backend reachable**, even when the extension's TTS
-target is set to "direct" (calling an OpenAI-compatible server directly for synthesis). PDF text
-extraction only exists on the ReadAloud FastAPI backend — an OpenAI-compatible `/v1/audio/speech`
-endpoint has no concept of PDF parsing. Only the speech-synthesis step after extraction can go
-through direct/OpenAI.
+**PDFs can't be read when the extension's TTS target is "direct".** PDF text extraction only
+exists on the ReadAloud FastAPI backend — an OpenAI-compatible `/v1/audio/speech` endpoint has no
+concept of PDF parsing — so "Read Page" on a PDF reports an error in direct mode.
 
 Reading a PDF from a local `file://` URL depends on Firefox's local-file-access permissions for
 extensions, which vary by Firefox version and are still evolving upstream (Mozilla is actively

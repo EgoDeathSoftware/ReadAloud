@@ -42,9 +42,7 @@ function formSettings() {
 function syncFieldVisibility() {
   const direct = selectedTarget() === TARGET_DIRECT;
   directFields.classList.toggle("hidden", !direct);
-  // Backend URL stays visible even on "direct" — PDF extraction always goes
-  // through the ReadAloud backend regardless of the TTS target.
-  backendFields.classList.toggle("hidden", false);
+  backendFields.classList.toggle("hidden", direct);
 }
 
 async function refreshVoices(selectedVoice) {
@@ -88,6 +86,10 @@ for (const radio of document.querySelectorAll('input[name="tts-target"]')) {
 for (const input of [backendUrlInput, directUrlInput, directApiKeyInput, directModelInput]) {
   input.addEventListener("change", () => refreshVoices(voiceSelect.value));
 }
+
+document.getElementById("show-api-key").addEventListener("change", (event) => {
+  directApiKeyInput.type = event.target.checked ? "text" : "password";
+});
 
 speedRange.addEventListener("input", () => {
   speedValue.textContent = parseFloat(speedRange.value).toFixed(1);

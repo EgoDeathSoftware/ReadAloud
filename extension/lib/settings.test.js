@@ -34,8 +34,8 @@ describe("loadSettings", () => {
     await expect(loadSettings()).resolves.toEqual(DEFAULT_SETTINGS);
   });
 
-  it("defaults the direct target to the Kokoro container port", () => {
-    expect(DEFAULT_SETTINGS.directUrl).toBe("http://localhost:8880");
+  it("defaults the direct target to OpenAI", () => {
+    expect(DEFAULT_SETTINGS.directUrl).toBe("https://api.openai.com");
     expect(DEFAULT_SETTINGS.ttsTarget).toBe("backend");
   });
 
