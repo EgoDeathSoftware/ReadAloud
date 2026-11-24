@@ -29,9 +29,8 @@ docker run -d --name readaloud -p 8055:8000 \
   egodeathsoftware/readaloud:latest
 ```
 
-Configure the extension to use the configured Readaloud backend
-
-Open `http://localhost:8055`.
+Open `http://localhost:8055`. To use the Firefox extension with this backend, set its ReadAloud
+backend URL to `http://localhost:8055` in the extension's options.
 
 - **NVIDIA GPU:** use `ghcr.io/remsky/kokoro-fastapi-gpu:latest` and add `--gpus all` to the Kokoro
   `docker run` (requires the NVIDIA Container Toolkit).
@@ -40,7 +39,9 @@ Open `http://localhost:8055`.
 - **Hosted provider (e.g. OpenAI):** skip Kokoro and set `READALOUD_TTS_BASE_URL`,
   `READALOUD_TTS_API_KEY`, `READALOUD_TTS_MODEL` and `READALOUD_TTS_DEFAULT_VOICE` instead.
 
+## Docker Compose
 
+All modes build the app and serve it at `http://localhost:8055`.
 
 ### Remote TTS
 
